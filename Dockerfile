@@ -26,6 +26,9 @@ RUN apt-get update && apt-get install -y --fix-missing \
     # ros-humble-libpointmatcher: Library for Iterative Closest Point (ICP) matching
     ros-humble-rviz2 \
     # ros-humble-rviz2: 3D visualization tool for ROS 2 (to see the map and lidar data)
+    ros-humble-velodyne \
+    # GTSAM for Pose Graph Optimization
+    ros-humble-gtsam \
     && rm -rf /var/lib/apt/lists/*
     # Clean up the apt cache to keep the Docker image size small
 
@@ -60,7 +63,7 @@ RUN apt-get update && apt-get install -y \
     python3-colcon-common-extensions \
     python3-pip \
     python3-tk \
-    && pip3 install "rosbags" "numpy<2.0" lz4 pandas matplotlib psutil
+    && pip3 install "rosbags" "numpy<2.0" lz4 pandas matplotlib psutil open3d
 
 # 5. Install evo for trajectory evaluation
 RUN apt-get update && apt-get install -y python3-pip && \

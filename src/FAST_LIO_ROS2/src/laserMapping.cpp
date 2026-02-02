@@ -1110,8 +1110,15 @@ private:
             // We use min/max to ensure the value stays between -1 and 1 (to prevent math errors).
             double angle_moved = acos(std::min(1.0, std::max(-1.0, (trace - 1.0) / 2.0))); // Radians
 
-            // 3. Thresholds: 1.0 meter OR 0.2 radians (~11 degrees)
-            if (is_first_keyframe || dist_moved > 1.0 || angle_moved > 0.2) 
+            // 3. Novelty Detection (The "Intelligence" Upgrade)
+            // If a large portion of the current scan was added to the map, the scene has changed.
+            // feats_down_size is the total points in the downsampled scan.
+            // add_point_size is the number of those points that were NEW to the map.
+            double novelty_ratio = (feats_down_size > 0) ? (double(add_point_size) / feats_down_size) : 0.0;
+            bool is_novel = (novelty_ratio > 0.40); // If >40% of the view is new, take a keyframe!
+
+            // 4. Combined Thresholds: Distance OR Rotation OR Novelty
+            if (is_first_keyframe || dist_moved > 1.0 || angle_moved > 0.2 || is_novel) 
             {
                 is_keyframe = true; // THEN: We declare this a Keyframe
                 last_keyframe_pos = state_point.pos; // Update the Last variables to be Current

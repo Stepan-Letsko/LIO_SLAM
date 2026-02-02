@@ -1,4 +1,5 @@
 import subprocess
+import argparse
 import os
 import sys
 import time
@@ -20,12 +21,16 @@ RESULTS_BASE = Path("/root/ros2_ws/src/results/full_analysis_results")
 EXPECTED_PCD_NAME = "Current_map.pcd" 
 FAST_LIO_LOG_PATH = Path("/root/ros2_ws/src/FAST_LIO_ROS2/Log/fast_lio_time_log.csv")
 BAG_TO_TUM_SCRIPT = Path(__file__).parent / "bag_to_tum.py"
+BAG_TO_PCD_SCRIPT = Path(__file__).parent / "bag_to_pcd.py"
 
 class FastLioAnalyzer:
-    def __init__(self, bag_path, config_file):
+    def __init__(self, bag_path, config_file, use_decoder=False, start_offset=0.0, duration=None):
         self.bag_path = Path(bag_path)
         self.bag_name = self.bag_path.stem
         self.config_file = config_file
+        self.use_decoder = use_decoder
+        self.start_offset = start_offset
+        self.duration = duration
         self.output_dir = RESULTS_BASE / f"{self.bag_name}_FULL_ANALYSIS"
         
         # Data Containers
@@ -215,7 +220,15 @@ class FastLioAnalyzer:
         print(f"Starting Full Analysis for {self.bag_name} ({self.total_duration:.1f}s)")
         print(f"Output: {self.output_dir}")
 
-        # 1. Start Recording (Background)
+        # 0. Start Decoder if requested (For DARPA/Raw Packets)
+        proc_decoder = None
+        if self.use_decoder:
+            print("   -> Launching Velodyne Decoder...")
+            decoder_cmd = ['ros2', 'launch', 'fast_lio', 'decoder.launch.py']
+            proc_decoder = subprocess.Popen(decoder_cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            time.sleep(2) # Give it a moment to initialize
+
+        # 1. Start Recording (Background) - Record Odometry, Cloud, and Path
         bag_out = self.output_dir / "recorded_bag"
         print("   -> Starting Recorder...")
         rec_cmd = ['ros2', 'bag', 'record', '/Odometry', '/cloud_registered', '/path', '-o', str(bag_out)]
@@ -241,15 +254,24 @@ class FastLioAnalyzer:
         print("Waiting 5 seconds for node to initialise...")
         time.sleep(5) 
         print("   -> Playing Bag...")
+        
+        # Construct Bag Play Command
         play_cmd = ['ros2', 'bag', 'play', str(self.bag_path), '--clock']
+        if self.start_offset > 0:
+            play_cmd.extend(['--start-offset', str(self.start_offset)])
+        
+        # Note: We handle duration manually in the loop to ensure clean shutdown
         proc_play = subprocess.Popen(play_cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
 
         # 6. Progress Bar Loop
         start_t = time.time()
+        # If user specified a duration, use that. Otherwise use bag length.
+        target_duration = self.duration if self.duration else self.total_duration
+
         try:
             while proc_play.poll() is None:
                 elapsed = time.time() - start_t
-                percent = min(100, (elapsed / self.total_duration) * 100)
+                percent = min(100, (elapsed / target_duration) * 100)
                 
                 # Dynamic Status Line
                 ram_str = f"{self.resource_stats[-1][2]:.0f}" if self.resource_stats else "0"
@@ -259,6 +281,10 @@ class FastLioAnalyzer:
                 sys.stdout.write(f"\r|{bar}| {percent:.1f}% | RAM: {ram_str} MB | Frames: {frames_str}")
                 sys.stdout.flush()
                 time.sleep(0.5)
+                
+                # Manual Duration Check
+                if self.duration and elapsed >= self.duration:
+                    break
 
         except KeyboardInterrupt:
             print("\n Interrupted!")
@@ -280,6 +306,7 @@ class FastLioAnalyzer:
         os.kill(proc_play.pid, signal.SIGINT) if proc_play.poll() is None else None
         os.kill(proc_rec.pid, signal.SIGINT)
         os.kill(proc_mapping.pid, signal.SIGINT)
+        if proc_decoder: os.kill(proc_decoder.pid, signal.SIGINT)
         
         # Wait for threads
         t_log.join()
@@ -289,6 +316,17 @@ class FastLioAnalyzer:
         if Path(EXPECTED_PCD_NAME).exists():
             shutil.move(EXPECTED_PCD_NAME, self.output_dir / "final_map.pcd")
             print("   -> Map Saved successfully.")
+        elif BAG_TO_PCD_SCRIPT.exists() and bag_out.exists():
+            print("   -> Reconstructing map from recorded bag (RAM Saving Mode)...")
+            pcd_out = self.output_dir / "final_map.pcd"
+            subprocess.run([
+                'python3', str(BAG_TO_PCD_SCRIPT), 
+                str(bag_out), 
+                '--topic', '/cloud_registered',
+                '--output', str(pcd_out),
+                '--voxel', '0.05'
+            ], check=True)
+            print(f"   -> Map reconstructed to {pcd_out.name}")
             
         # Extract Trajectory (TUM format) for Evo
         if BAG_TO_TUM_SCRIPT.exists() and bag_out.exists():
@@ -313,12 +351,14 @@ class FastLioAnalyzer:
         print(f"DONE. All data in {self.output_dir}")
 
 if __name__ == "__main__":
-    if len(sys.argv) < 2:
-        print("Usage: python3 run_full_analysis.py [BAG_PATH] [CONFIG_FILE]")
-        sys.exit(1)
-        
-    bag = sys.argv[1]
-    cfg = sys.argv[2] if len(sys.argv) > 2 else "velodyne.yaml"
+    parser = argparse.ArgumentParser(description="Run Full FAST-LIO Analysis")
+    parser.add_argument("bag_path", help="Path to input rosbag")
+    parser.add_argument("config_file", nargs="?", default="velodyne.yaml", help="Config file name (default: velodyne.yaml)")
+    parser.add_argument("--decoder", action="store_true", help="Launch Velodyne decoder (for raw packet bags like DARPA)")
+    parser.add_argument("--start", type=float, default=0.0, help="Start offset in seconds")
+    parser.add_argument("--duration", type=float, default=None, help="Duration to run in seconds (optional)")
     
-    analyzer = FastLioAnalyzer(bag, cfg)
+    args = parser.parse_args()
+    
+    analyzer = FastLioAnalyzer(args.bag_path, args.config_file, args.decoder, args.start, args.duration)
     analyzer.run()
