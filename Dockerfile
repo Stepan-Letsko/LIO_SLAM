@@ -35,8 +35,15 @@ RUN apt-get update && \
     ros-humble-gtsam \
     # Foxglove Bridge for visualization
     ros-humble-foxglove-bridge \
+    # Tools to download missing headers
+    wget \
     && rm -rf /var/lib/apt/lists/*
     # Clean up the apt cache to keep the Docker image size small
+
+# Download missing ScanContext headers directly into the source tree (if mounting volume, this might be hidden, so we do it in a temp spot or assume user does it. 
+# BETTER: Add them to the repo. But for now, let's install them to a system include path so they are always found.)
+RUN wget https://raw.githubusercontent.com/jlblancoc/nanoflann/master/include/nanoflann.hpp -O /usr/local/include/nanoflann.hpp && \
+    wget https://raw.githubusercontent.com/gisbi-kim/scancontext/main/cpp/module/Scancontext/KDTreeVectorOfVectorsAdaptor.h -O /usr/local/include/KDTreeVectorOfVectorsAdaptor.h
 
 # 2. Install Livox-SDK2 (Required by livox_ros_driver2)
 # We clone and install it into the system folders of the container manually
