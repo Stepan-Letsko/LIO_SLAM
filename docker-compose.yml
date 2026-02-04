@@ -25,6 +25,9 @@ services:
     stdin_open: true
     # Allocate a pseudo-TTY (terminal), necessary for running interactive shell commands.
     tty: true
+    # Map ports for Foxglove Bridge (Host:Container)
+    # ports:
+    #   - "8765:8765"
     # Mount volumes to share files between the host (laptop) and the container.
     # Format is: host_path:container_path
     volumes:

@@ -238,7 +238,9 @@ class FastLioAnalyzer:
         print(f"   -> Launching Node ({self.config_file})...")
         # stdbuf -oL forces line buffering so we can read logs instantly
         launch_cmd = ['stdbuf', '-oL', 'ros2', 'launch', 'fast_lio', 'mapping.launch.py', 
-                      f'config_file:={self.config_file}', 'rviz:=false']
+                      f'config_file:={self.config_file}', 
+                      #'rviz:=false'
+                      ]
         proc_mapping = subprocess.Popen(launch_cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
         
         # 3. Find PID

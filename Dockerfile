@@ -9,7 +9,11 @@ FROM ros:humble-ros-base
 
 # 1. Install basic tools and dependencies for FAST_LIO
 # Update package lists and install packages with automatic 'yes' to prompts
-RUN apt-get update && apt-get install -y --fix-missing \
+RUN apt-get update && \
+    apt-get install -y --no-install-recommends ca-certificates gnupg && \
+    rm -rf /var/lib/apt/lists/* && \
+    apt-get update && \
+    apt-get install -y --fix-missing \
     git \
     # git: Version control system to clone repositories
     cmake \
@@ -29,6 +33,8 @@ RUN apt-get update && apt-get install -y --fix-missing \
     ros-humble-velodyne \
     # GTSAM for Pose Graph Optimization
     ros-humble-gtsam \
+    # Foxglove Bridge for visualization
+    ros-humble-foxglove-bridge \
     && rm -rf /var/lib/apt/lists/*
     # Clean up the apt cache to keep the Docker image size small
 

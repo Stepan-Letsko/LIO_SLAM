@@ -3,7 +3,11 @@ import argparse
 import sys
 import os
 import numpy as np
+import psutil
 import open3d as o3d
+import concurrent.futures
+import tempfile
+import shutil
 import rclpy
 from rclpy.serialization import deserialize_message
 import rosbag2_py
@@ -18,7 +22,24 @@ def get_rosbag_options(path, storage_id='sqlite3', serialization_format='cdr'):
         output_serialization_format=serialization_format)
     return storage_options, converter_options
 
-def merge_pcd(bag_path, topic_name, output_path, voxel_size=0.1, storage_id='sqlite3'):
+def process_chunk_task(chunk_arrays, voxel_size, save_path):
+    """Worker function to process and save a chunk to disk."""
+    if not chunk_arrays:
+        return 0
+    
+    # Concatenate numpy arrays
+    all_pts = np.concatenate(chunk_arrays, axis=0)
+    
+    pcd = o3d.geometry.PointCloud()
+    pcd.points = o3d.utility.Vector3dVector(all_pts)
+    
+    if voxel_size > 0:
+        pcd = pcd.voxel_down_sample(voxel_size=voxel_size)
+        
+    o3d.io.write_point_cloud(save_path, pcd, write_ascii=False, compressed=False, print_progress=False)
+    return len(pcd.points)
+
+def merge_pcd(bag_path, topic_name, output_path, voxel_size=0.1, storage_id='sqlite3', chunk_size=5000):
     """
     Reads a ROS2 bag, extracts PointCloud2 messages, merges them, and saves as PCD.
     """
@@ -48,7 +69,14 @@ def merge_pcd(bag_path, topic_name, output_path, voxel_size=0.1, storage_id='sql
     except Exception:
         pass # Fail silently if metadata can't be read, fallback to old print
 
-    merged_points = []
+    # Setup temporary directory for chunks
+    temp_dir = tempfile.mkdtemp()
+    print(f"Using temporary directory for chunks: {temp_dir}")
+
+    executor = concurrent.futures.ProcessPoolExecutor()
+    futures = []
+    chunk_files = []
+    chunk_points = []
     msg_count = 0
 
     while reader.has_next():
@@ -72,41 +100,95 @@ def merge_pcd(bag_path, topic_name, output_path, voxel_size=0.1, storage_id='sql
 
                 if points.ndim == 1:
                     points = points.reshape(-1, 3)
-                merged_points.append(points)
+                
+                chunk_points.append(points)
             
             msg_count += 1
             
+            # Check chunk size or RAM safety
+            mem_usage = psutil.virtual_memory().percent
+            if len(chunk_points) >= chunk_size or (len(chunk_points) > 0 and mem_usage > 80.0):
+                # Submit chunk to worker
+                chunk_filename = os.path.join(temp_dir, f"chunk_{len(futures)}.pcd")
+                chunk_files.append(chunk_filename)
+                
+                # Submit task (copy list to avoid reference issues)
+                f = executor.submit(process_chunk_task, chunk_points, voxel_size, chunk_filename)
+                futures.append(f)
+                
+                chunk_points = [] # Clear buffer
+                
+                # If RAM is critical, wait for workers to clear backlog
+                if mem_usage > 85.0:
+                    concurrent.futures.wait(futures, timeout=None)
+
             if total_msgs > 0:
                 percent = (msg_count / total_msgs) * 100
-                bar_len = 40
-                filled = int(bar_len * msg_count // total_msgs)
-                bar = '█' * filled + '-' * (bar_len - filled)
-                sys.stdout.write(f"\r|{bar}| {percent:.1f}%")
+                sys.stdout.write(f"\rProcessing: {percent:.1f}% | Chunks: {len(futures)} | RAM: {mem_usage:.1f}%")
                 sys.stdout.flush()
-            elif msg_count % 100 == 0:
-                print(f"Processed {msg_count} frames...")
 
-    if not merged_points:
-        print("\nNo point cloud data found!")
+    # Process remaining points
+    if chunk_points:
+        chunk_filename = os.path.join(temp_dir, f"chunk_{len(futures)}.pcd")
+        chunk_files.append(chunk_filename)
+        f = executor.submit(process_chunk_task, chunk_points, voxel_size, chunk_filename)
+        futures.append(f)
+
+    print("\nWaiting for background tasks to finish...")
+    concurrent.futures.wait(futures)
+    executor.shutdown()
+
+    # Calculate total points
+    total_points = 0
+    try:
+        for f in futures:
+            total_points += f.result()
+    except Exception as e:
+        print(f"Error in worker process: {e}")
+        shutil.rmtree(temp_dir)
         return
 
-    # Concatenate all frames into one massive array
-    print("\nMerging point clouds...")
-    all_points = np.concatenate(merged_points, axis=0)
+    if total_points == 0:
+        print("\nNo point cloud data found!")
+        shutil.rmtree(temp_dir)
+        return
+
+    # Glue chunks together
+    print(f"Gluing {len(chunk_files)} chunks into {output_path}...")
     
-    # Create Open3D PointCloud
-    pcd = o3d.geometry.PointCloud()
-    pcd.points = o3d.utility.Vector3dVector(all_points)
-
-    # Optional: Downsample to save disk space and remove duplicates
-    if voxel_size > 0:
-        print(f"Downsampling with voxel size {voxel_size}m...")
-        pcd = pcd.voxel_down_sample(voxel_size=voxel_size)
-
-    # Save to file
-    print(f"Saving to {output_path}...")
-    o3d.io.write_point_cloud(output_path, pcd)
-    print(f"Done! Saved {len(pcd.points)} points.")
+    try:
+        with open(output_path, 'wb') as f_out:
+            # Write PCD Header
+            header = f"""# .PCD v0.7 - Point Cloud Data file format
+VERSION 0.7
+FIELDS x y z
+SIZE 4 4 4
+TYPE F F F
+COUNT 1 1 1
+WIDTH {total_points}
+HEIGHT 1
+VIEWPOINT 0 0 0 1 0 0 0
+POINTS {total_points}
+DATA binary
+"""
+            f_out.write(header.encode('ascii'))
+            
+            # Append Data
+            for i, pcd_path in enumerate(chunk_files):
+                # Load chunk to get binary data
+                chunk_pcd = o3d.io.read_point_cloud(pcd_path)
+                pts = np.asarray(chunk_pcd.points, dtype=np.float32)
+                f_out.write(pts.tobytes())
+                
+                if i % 10 == 0:
+                    sys.stdout.write(f"\rMerging chunk {i+1}/{len(chunk_files)}")
+                    sys.stdout.flush()
+        
+        print(f"\nDone! Saved {total_points} points.")
+        
+    finally:
+        # Cleanup temp files
+        shutil.rmtree(temp_dir)
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Convert ROS2 Bag to Merged PCD")
@@ -115,6 +197,7 @@ if __name__ == "__main__":
     parser.add_argument("--output", default="final_map.pcd", help="Output filename")
     parser.add_argument("--voxel", type=float, default=0.1, help="Voxel downsample size in meters (0 to disable)")
     parser.add_argument("--storage_id", default="sqlite3", help="Storage format (sqlite3 or mcap)")
+    parser.add_argument("--chunk_size", type=int, default=1000, help="Target frames to process before merging (default: 1000)")
 
     args = parser.parse_args()
-    merge_pcd(args.bag_path, args.topic, args.output, args.voxel, args.storage_id)
+    merge_pcd(args.bag_path, args.topic, args.output, args.voxel, args.storage_id, args.chunk_size)
