@@ -62,6 +62,10 @@
 #include <livox_ros_driver/msg/custom_msg.hpp>
 #include "preprocess.h"
 #include <ikd-Tree/ikd_Tree.h>
+#include "Scancontext.h"
+#include <fstream>  // Required for saving files
+#include <iomanip>
+#include <visualization_msgs/msg/marker.hpp>
 
 #define INIT_TIME           (0.1)
 #define LASER_POINT_COV     (0.001)
@@ -148,6 +152,34 @@ geometry_msgs::msg::PoseStamped msg_body_pose;
 
 shared_ptr<Preprocess> p_pre(new Preprocess());
 shared_ptr<ImuProcess> p_imu(new ImuProcess());
+
+// --- GLOBAL VARIABLES --- -- STEPAN LETSKO
+SCManager scManager;
+rclcpp::Publisher<visualization_msgs::msg::Marker>::SharedPtr pubSCKeyframes;
+
+void init_scan_context_log() {
+    std::string filename = root_dir + "/Log/scan_contexts.csv";
+    std::ofstream file(filename); // Open in default mode to truncate/wipe the file
+    if (file.is_open()) {
+        file.close();
+    }
+}
+
+void save_scan_context_to_file(const Eigen::MatrixXd& sc, double time) {
+    std::string filename = root_dir + "/Log/scan_contexts.csv";
+    std::ofstream file(filename, std::ios::app); // Open in append mode
+    
+    if (file.is_open()) {
+        file << std::fixed << std::setprecision(6) << time; // First column: Timestamp
+        for (int i = 0; i < sc.rows(); ++i) {
+            for (int j = 0; j < sc.cols(); ++j) {
+                file << "," << sc(i, j); // Subsequent columns: Pixel values
+            }
+        }
+        file << "\n";
+        file.close();
+    }
+}
 
 void SigHandle(int sig)
 {
@@ -915,6 +947,7 @@ public:
         string pos_log_dir = root_dir + "/Log/pos_log.txt";
         fp = fopen(pos_log_dir.c_str(),"w");
         
+        init_scan_context_log(); // Wipe the scan context log file at startup
         // STEPAN LETSKO 27/01/2026
         string time_log_dir = root_dir + "/Log/fast_lio_time_log.csv";
         fp2 = fopen(time_log_dir.c_str(),"w");
@@ -952,6 +985,7 @@ public:
         pubOdomAftMapped_ = this->create_publisher<nav_msgs::msg::Odometry>("/Odometry", 20);
         pubPath_ = this->create_publisher<nav_msgs::msg::Path>("/path", 20);
         tf_broadcaster_ = std::make_unique<tf2_ros::TransformBroadcaster>(*this);
+        pubSCKeyframes = this->create_publisher<visualization_msgs::msg::Marker>("/scan_context/keyframes", 10);
 
         //------------------------------------------------------------------------------------------------------
         auto period_ms = std::chrono::milliseconds(static_cast<int64_t>(1000.0 / 100.0));
@@ -1110,7 +1144,7 @@ private:
             // We use min/max to ensure the value stays between -1 and 1 (to prevent math errors).
             double angle_moved = acos(std::min(1.0, std::max(-1.0, (trace - 1.0) / 2.0))); // Radians
 
-            // 3. Novelty Detection (The "Intelligence" Upgrade)
+            // 3. Novelty Detection (The Intelligence Upgrade)
             // If a large portion of the current scan was added to the map, the scene has changed.
             // feats_down_size is the total points in the downsampled scan.
             // add_point_size is the number of those points that were NEW to the map.
@@ -1118,12 +1152,41 @@ private:
             bool is_novel = (novelty_ratio > 0.40); // If >40% of the view is new, take a keyframe!
 
             // 4. Combined Thresholds: Distance OR Rotation OR Novelty
-            if (is_first_keyframe || dist_moved > 1.0 || angle_moved > 0.2 || is_novel) 
+            // Modified to strictly follow (Distance/Angle) and ignore novelty for SC generation to reduce count
+            if (is_first_keyframe || dist_moved > 1.0 || angle_moved > 0.2 /*|| is_novel*/) 
             {
                 is_keyframe = true; // THEN: We declare this a Keyframe
                 last_keyframe_pos = state_point.pos; // Update the Last variables to be Current
                 last_keyframe_rot = state_point.rot; // So the next check is calculated relative to THIS spot.
                 is_first_keyframe = false; // Turn off the first_frame flag forever.
+
+                // STEPAN LETSKO
+                // ---------------- SCAN CONTEXT LOGIC ----------------
+                // Moved inside is_keyframe block to throttle generation
+                
+                // 1. Generate ScanContext
+                scManager.makeAndSaveScancontextAndKeys(*feats_down_body); 
+
+                // 2. Visualize the Breadcrumb (Red Sphere)
+                static int keyframe_count = 0;
+                visualization_msgs::msg::Marker marker;
+                marker.header.frame_id = "camera_init";
+                marker.header.stamp = this->now();
+                marker.ns = "sc_keyframes";
+                marker.id = keyframe_count++;
+                marker.type = visualization_msgs::msg::Marker::SPHERE;
+                marker.action = visualization_msgs::msg::Marker::ADD;
+                marker.pose.position.x = state_point.pos(0);
+                marker.pose.position.y = state_point.pos(1);
+                marker.pose.position.z = state_point.pos(2);
+                marker.scale.x = 0.3; marker.scale.y = 0.3; marker.scale.z = 0.3;
+                marker.color.r = 1.0; marker.color.a = 1.0;
+                pubSCKeyframes->publish(marker);
+
+                // 3. Save the 2D Image to File
+                Eigen::MatrixXd current_sc = scManager.getConstRefRecentSCD();
+                save_scan_context_to_file(current_sc, lidar_end_time);
+                // ---------------------------------------------------- END
             }
             // ==========================================
             
