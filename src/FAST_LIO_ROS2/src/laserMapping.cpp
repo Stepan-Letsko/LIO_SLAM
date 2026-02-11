@@ -156,6 +156,9 @@ shared_ptr<ImuProcess> p_imu(new ImuProcess());
 // --- GLOBAL VARIABLES --- -- STEPAN LETSKO
 SCManager scManager;
 rclcpp::Publisher<visualization_msgs::msg::Marker>::SharedPtr pubSCKeyframes;
+rclcpp::Publisher<visualization_msgs::msg::Marker>::SharedPtr pubSCLoopLines;
+std::vector<Eigen::Vector3d> keyframePoses; // Stores the XYZ of every keyframe
+std::ofstream loop_log; // Log file for loop closure events
 
 void init_scan_context_log() {
     std::string filename = root_dir + "/Log/scan_contexts.csv";
@@ -954,6 +957,13 @@ public:
         if (fp2) {
             fprintf(fp2,"time_stamp, math_time, scan_point_size, incremental_time, search_time, delete_size, delete_time, tree_size_st, tree_size_end, add_point_size, preprocess_time, io_time\n");
         }
+        
+        string loop_log_dir = root_dir + "/Log/loop_closure_log.csv";
+        loop_log.open(loop_log_dir);
+        if (loop_log.is_open()) {
+            loop_log << "timestamp,current_frame,matched_frame,score,yaw_diff,position_drift\n";
+            loop_log.flush(); // Force write header immediately
+        }
         // END
 
         // ofstream fout_pre, fout_out, fout_dbg;
@@ -986,6 +996,7 @@ public:
         pubPath_ = this->create_publisher<nav_msgs::msg::Path>("/path", 20);
         tf_broadcaster_ = std::make_unique<tf2_ros::TransformBroadcaster>(*this);
         pubSCKeyframes = this->create_publisher<visualization_msgs::msg::Marker>("/scan_context/keyframes", 10);
+        pubSCLoopLines = this->create_publisher<visualization_msgs::msg::Marker>("/scan_context/loop_lines", 10);
 
         //------------------------------------------------------------------------------------------------------
         auto period_ms = std::chrono::milliseconds(static_cast<int64_t>(1000.0 / 100.0));
@@ -1005,6 +1016,7 @@ public:
         fout_pre.close();
         fclose(fp);
         if (fp2) fclose(fp2); // STEPAN LETSKO
+        if (loop_log.is_open()) loop_log.close();
     }
 
 private:
@@ -1163,29 +1175,99 @@ private:
                 // STEPAN LETSKO
                 // ---------------- SCAN CONTEXT LOGIC ----------------
                 // Moved inside is_keyframe block to throttle generation
+                static int keyframe_count = 0;
                 
-                // 1. Generate ScanContext
+                // 1. Save Position & Context
+                keyframePoses.push_back(state_point.pos); 
                 scManager.makeAndSaveScancontextAndKeys(*feats_down_body); 
 
-                // 2. Visualize the Breadcrumb (Red Sphere)
-                static int keyframe_count = 0;
+                // 2. CHECK FOR LOOP CLOSURE
+                auto result = scManager.detectLoopClosureID();
+                int loop_index = std::get<0>(result); // The ID of the old match (-1 if none)
+                double loop_score = std::get<2>(result); // The distance score
+
+                // 3. DEFINE CURRENT COLOR (Default Red)
+                float r=1.0, g=0.0, b=0.0;
+
+                if (loop_index != -1) {
+                    // LOOP FOUND! Change Current Color to GREEN
+                    r=0.0; g=1.0; b=0.0; 
+                    
+                    // --- VISUALIZATION A: REPAINT OLD MARKER GREEN ---
+                    // We republish the OLD marker ID with a new color
+                    visualization_msgs::msg::Marker old_marker;
+                    old_marker.header.frame_id = "camera_init";
+                    old_marker.header.stamp = this->now();
+                    old_marker.ns = "sc_keyframes";
+                    old_marker.id = loop_index; // REUSE OLD ID
+                    old_marker.type = visualization_msgs::msg::Marker::SPHERE;
+                    old_marker.action = visualization_msgs::msg::Marker::ADD; // "ADD" overwrites the old one
+                    
+                    // Get Old Position from our Vector
+                    if (loop_index < (int)keyframePoses.size()) {
+                        Eigen::Vector3d p_old = keyframePoses[loop_index];
+                        old_marker.pose.position.x = p_old(0);
+                        old_marker.pose.position.y = p_old(1);
+                        old_marker.pose.position.z = p_old(2);
+                        old_marker.scale.x = 0.5; old_marker.scale.y = 0.5; old_marker.scale.z = 0.5; // Make it BIGGER
+                        old_marker.color.r = 0.0; old_marker.color.g = 1.0; old_marker.color.b = 0.0; old_marker.color.a = 1.0;
+                        pubSCKeyframes->publish(old_marker);
+
+                        // --- VISUALIZATION B: DRAW THE LINE ---
+                        visualization_msgs::msg::Marker line_marker;
+                        line_marker.header.frame_id = "camera_init";
+                        line_marker.header.stamp = this->now();
+                        line_marker.ns = "sc_loop_lines";
+                        line_marker.id = keyframe_count;
+                        line_marker.type = visualization_msgs::msg::Marker::LINE_LIST;
+                        line_marker.action = visualization_msgs::msg::Marker::ADD;
+                        line_marker.scale.x = 0.05; 
+                        line_marker.color.r = 0.0; line_marker.color.g = 1.0; line_marker.color.b = 0.0; line_marker.color.a = 1.0;
+
+                        geometry_msgs::msg::Point p1, p2;
+                        p1.x = state_point.pos(0); p1.y = state_point.pos(1); p1.z = state_point.pos(2);
+                        p2.x = p_old(0); p2.y = p_old(1); p2.z = p_old(2);
+                        line_marker.points.push_back(p1);
+                        line_marker.points.push_back(p2);
+                        pubSCLoopLines->publish(line_marker);
+
+                        RCLCPP_INFO(this->get_logger(), "LOOP FOUND: Frame %d <--> Frame %d", keyframe_count, loop_index);
+                        
+                        // Log to file
+                        if (loop_log.is_open()) {
+                            double pos_drift = (keyframePoses[loop_index] - state_point.pos).norm();
+                            loop_log << std::fixed << std::setprecision(6) 
+                                     << lidar_end_time << "," 
+                                     << keyframe_count << "," 
+                                     << loop_index << "," 
+                                     << loop_score << "," 
+                                     << std::get<1>(result) << ","
+                                     << pos_drift << "\n";
+                            loop_log.flush(); // Force write to disk immediately
+                        }
+                    }
+                }
+
+                // 4. PUBLISH CURRENT MARKER (Red normally, Green if loop found)
                 visualization_msgs::msg::Marker marker;
                 marker.header.frame_id = "camera_init";
                 marker.header.stamp = this->now();
                 marker.ns = "sc_keyframes";
-                marker.id = keyframe_count++;
+                marker.id = keyframe_count;
                 marker.type = visualization_msgs::msg::Marker::SPHERE;
                 marker.action = visualization_msgs::msg::Marker::ADD;
                 marker.pose.position.x = state_point.pos(0);
                 marker.pose.position.y = state_point.pos(1);
                 marker.pose.position.z = state_point.pos(2);
                 marker.scale.x = 0.3; marker.scale.y = 0.3; marker.scale.z = 0.3;
-                marker.color.r = 1.0; marker.color.a = 1.0;
+                marker.color.r = r; marker.color.g = g; marker.color.b = b; marker.color.a = 1.0;
                 pubSCKeyframes->publish(marker);
 
-                // 3. Save the 2D Image to File
+                // 5. Save the 2D Image to File
                 Eigen::MatrixXd current_sc = scManager.getConstRefRecentSCD();
                 save_scan_context_to_file(current_sc, lidar_end_time);
+                
+                keyframe_count++;
                 // ---------------------------------------------------- END
             }
             // ==========================================
