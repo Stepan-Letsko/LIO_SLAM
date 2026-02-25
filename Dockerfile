@@ -78,7 +78,18 @@ RUN apt-get update && apt-get install -y \
     python3-tk \
     && pip3 install "rosbags" "numpy<2.0" lz4 pandas matplotlib psutil open3d
 
-# 5. Install evo for trajectory evaluation
+# 5. Install SBG ROS2 Driver
+# Clone source, install dependencies (fixing the libapr1-dev issue), and build
+RUN mkdir -p src && \
+    git clone https://github.com/SBG-Systems/sbg_ros2_driver.git src/sbg_ros2_driver && \
+    apt-get update && \
+    rosdep update && \
+    rosdep install --from-path src --ignore-src -y && \
+    . /opt/ros/humble/setup.sh && \
+    colcon build --packages-select sbg_driver && \
+    rm -rf /var/lib/apt/lists/*
+
+# 6. Install evo for trajectory evaluation
 RUN apt-get update && apt-get install -y python3-pip && \
     pip3 install evo --upgrade --no-binary evo && \
     rm -rf /var/lib/apt/lists/*

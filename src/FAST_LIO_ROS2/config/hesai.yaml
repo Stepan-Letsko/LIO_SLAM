@@ -13,15 +13,16 @@
         cube_side_length: 1000.0         # Size of the local map box around the robot. 1000m is effectively infinite.
         runtime_pos_log_enable: false    # true: Save a CSV log of position/time stats.
         map_file_path: "/root/ros2_ws/bags/hesai_map.pcd" # Absolute path where the final map will be saved.
+        loop_closure_enable: true        # Enable the loop closure module we just integrated
 
         common:
             # Hilti 2023 Bag Topics:
-            lid_topic:  "/hesai/pandar"  # Topic name for LiDAR point cloud
-            imu_topic:  "/alphasense/imu"      # Topic name for IMU data
+            # lid_topic:  "/hesai/pandar"  # Topic name for LiDAR point cloud
+            # imu_topic:  "/alphasense/imu"      # Topic name for IMU data
             
             # For my Real Hardware (Uncomment later):
-            # lid_topic:  "/hesai/pandar"
-            # imu_topic:  "/sbg/imu/data"
+            lid_topic:  "/hesai/pandar"
+            imu_topic:  "/imu/data"
 
             time_sync_en: false          # Only set to true if hardware time sync is missing (software sync).
             time_offset_lidar_to_imu: 0.00158 # Time offset in seconds. Leave 0.0 unless calibrate it manually.
