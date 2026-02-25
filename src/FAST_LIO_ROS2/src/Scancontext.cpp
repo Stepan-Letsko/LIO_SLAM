@@ -244,6 +244,7 @@ void SCManager::makeAndSaveScancontextAndKeys( pcl::PointCloud<SCPointType> & _s
 } // SCManager::makeAndSaveScancontextAndKeys
 
 
+// STEPAN LETSKO
 std::tuple<int, float, double> SCManager::detectLoopClosureID ( void )
 {
     int loop_id { -1 }; // init with -1, -1 means no loop (== LeGO-LOAM's variable "closestHistoryFrameID")

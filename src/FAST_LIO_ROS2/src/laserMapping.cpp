@@ -66,6 +66,8 @@
 #include <fstream>  // Required for saving files
 #include <iomanip>
 #include <visualization_msgs/msg/marker.hpp>
+#include <pcl/registration/icp.h>
+#include <pcl/registration/gicp.h>
 
 #define INIT_TIME           (0.1)
 #define LASER_POINT_COV     (0.001)
@@ -158,8 +160,10 @@ SCManager scManager;
 rclcpp::Publisher<visualization_msgs::msg::Marker>::SharedPtr pubSCKeyframes;
 rclcpp::Publisher<visualization_msgs::msg::Marker>::SharedPtr pubSCLoopLines;
 std::vector<Eigen::Vector3d> keyframePoses; // Stores the XYZ of every keyframe
+std::vector<pcl::PointCloud<PointType>::Ptr> keyframeClouds; // Stores the actual points
 std::ofstream loop_log; // Log file for loop closure events
 
+// STEPAN LETSKO
 void init_scan_context_log() {
     std::string filename = root_dir + "/Log/scan_contexts.csv";
     std::ofstream file(filename); // Open in default mode to truncate/wipe the file
@@ -168,6 +172,7 @@ void init_scan_context_log() {
     }
 }
 
+// STEPAN LETSKO
 void save_scan_context_to_file(const Eigen::MatrixXd& sc, double time) {
     std::string filename = root_dir + "/Log/scan_contexts.csv";
     std::ofstream file(filename, std::ios::app); // Open in append mode
@@ -835,6 +840,37 @@ void h_share_model(state_ikfom &s, esekfom::dyn_share_datastruct<double> &ekfom_
     solve_time += omp_get_wtime() - solve_start_;
 }
 
+// --- THE INSPECTOR: ICP VERIFICATION ---
+// STEPAN LETSKO
+float perform_icp_verification(pcl::PointCloud<PointType>::Ptr current_cloud, 
+                               pcl::PointCloud<PointType>::Ptr history_cloud,
+                               Eigen::Matrix4f &output_transform) 
+{
+    // We use GICP (Generalized ICP) - it's more robust than standard ICP
+    pcl::GeneralizedIterativeClosestPoint<PointType, PointType> icp;
+    
+    icp.setMaxCorrespondenceDistance(1.0); // Search radius (1 meter)
+    icp.setMaximumIterations(30);          // Don't spend forever trying (30 loops max)
+    icp.setTransformationEpsilon(1e-6);    // Stop if we are close enough
+    icp.setEuclideanFitnessEpsilon(1e-6);
+    icp.setRANSACIterations(0);            // Disable RANSAC for speed
+
+    // Feed the clouds
+    icp.setInputSource(current_cloud);
+    icp.setInputTarget(history_cloud);
+
+    // Perform Alignment
+    pcl::PointCloud<PointType> unused_result;
+    icp.align(unused_result);
+
+    // Get Results
+    output_transform = icp.getFinalTransformation(); 
+    
+    // Return the "Fitness Score" 
+    // This is the average squared distance between matched points.
+    return icp.getFitnessScore(); 
+}
+
 class LaserMappingNode : public rclcpp::Node
 {
 public:
@@ -873,6 +909,7 @@ public:
         this->declare_parameter<bool>("mapping.extrinsic_est_en", true);
         this->declare_parameter<bool>("pcd_save.pcd_save_en", false);
         this->declare_parameter<int>("pcd_save.interval", -1);
+        this->declare_parameter<bool>("loop_closure_enable", false);
         this->declare_parameter<vector<double>>("mapping.extrinsic_T", vector<double>());
         this->declare_parameter<vector<double>>("mapping.extrinsic_R", vector<double>());
 
@@ -909,6 +946,7 @@ public:
         this->get_parameter_or<bool>("mapping.extrinsic_est_en", extrinsic_est_en, true);
         this->get_parameter_or<bool>("pcd_save.pcd_save_en", pcd_save_en, false);
         this->get_parameter_or<int>("pcd_save.interval", pcd_save_interval, -1);
+        this->get_parameter_or<bool>("loop_closure_enable", loop_closure_en, false);
         this->get_parameter_or<vector<double>>("mapping.extrinsic_T", extrinT, vector<double>());
         this->get_parameter_or<vector<double>>("mapping.extrinsic_R", extrinR, vector<double>());
 
@@ -958,11 +996,12 @@ public:
             fprintf(fp2,"time_stamp, math_time, scan_point_size, incremental_time, search_time, delete_size, delete_time, tree_size_st, tree_size_end, add_point_size, preprocess_time, io_time\n");
         }
         
+        // STEPAN LETSKO
         string loop_log_dir = root_dir + "/Log/loop_closure_log.csv";
         loop_log.open(loop_log_dir);
         if (loop_log.is_open()) {
-            loop_log << "timestamp,current_frame,matched_frame,score,yaw_diff,position_drift\n";
-            loop_log.flush(); // Force write header immediately
+            loop_log << "timestamp,current_frame,matched_frame,sc_score,icp_score,loop_verified,yaw_diff,position_drift\n";
+            loop_log.flush(); // Ensure header is written immediately
         }
         // END
 
@@ -1016,7 +1055,7 @@ public:
         fout_pre.close();
         fclose(fp);
         if (fp2) fclose(fp2); // STEPAN LETSKO
-        if (loop_log.is_open()) loop_log.close();
+        if (loop_log.is_open()) loop_log.close(); // STEPAN LETSKO
     }
 
 private:
@@ -1172,103 +1211,135 @@ private:
                 last_keyframe_rot = state_point.rot; // So the next check is calculated relative to THIS spot.
                 is_first_keyframe = false; // Turn off the first_frame flag forever.
 
-                // STEPAN LETSKO
-                // ---------------- SCAN CONTEXT LOGIC ----------------
-                // Moved inside is_keyframe block to throttle generation
-                static int keyframe_count = 0;
-                
-                // 1. Save Position & Context
-                keyframePoses.push_back(state_point.pos); 
-                scManager.makeAndSaveScancontextAndKeys(*feats_down_body); 
-
-                // 2. CHECK FOR LOOP CLOSURE
-                auto result = scManager.detectLoopClosureID();
-                int loop_index = std::get<0>(result); // The ID of the old match (-1 if none)
-                double loop_score = std::get<2>(result); // The distance score
-
-                // 3. DEFINE CURRENT COLOR (Default Red)
-                float r=1.0, g=0.0, b=0.0;
-
-                if (loop_index != -1) {
-                    // LOOP FOUND! Change Current Color to GREEN
-                    r=0.0; g=1.0; b=0.0; 
+                if (loop_closure_en)
+                {
+                    // STEPAN LETSKO
+                    // ---------------- SCAN CONTEXT LOGIC ----------------
+                    // Moved inside is_keyframe block to throttle generation
+                    static int keyframe_count = 0;
                     
-                    // --- VISUALIZATION A: REPAINT OLD MARKER GREEN ---
-                    // We republish the OLD marker ID with a new color
-                    visualization_msgs::msg::Marker old_marker;
-                    old_marker.header.frame_id = "camera_init";
-                    old_marker.header.stamp = this->now();
-                    old_marker.ns = "sc_keyframes";
-                    old_marker.id = loop_index; // REUSE OLD ID
-                    old_marker.type = visualization_msgs::msg::Marker::SPHERE;
-                    old_marker.action = visualization_msgs::msg::Marker::ADD; // "ADD" overwrites the old one
+                    // 1. Save Position & Cloud for later use
+                    // We must CLONE the cloud because the original pointer changes every frame
+                    pcl::PointCloud<PointType>::Ptr this_cloud_copy(new pcl::PointCloud<PointType>);
+                    pcl::copyPointCloud(*feats_down_body, *this_cloud_copy);
                     
-                    // Get Old Position from our Vector
-                    if (loop_index < (int)keyframePoses.size()) {
-                        Eigen::Vector3d p_old = keyframePoses[loop_index];
-                        old_marker.pose.position.x = p_old(0);
-                        old_marker.pose.position.y = p_old(1);
-                        old_marker.pose.position.z = p_old(2);
-                        old_marker.scale.x = 0.5; old_marker.scale.y = 0.5; old_marker.scale.z = 0.5; // Make it BIGGER
-                        old_marker.color.r = 0.0; old_marker.color.g = 1.0; old_marker.color.b = 0.0; old_marker.color.a = 1.0;
-                        pubSCKeyframes->publish(old_marker);
+                    keyframeClouds.push_back(this_cloud_copy);
+                    keyframePoses.push_back(state_point.pos); 
+                    
+                    scManager.makeAndSaveScancontextAndKeys(*feats_down_body); 
 
-                        // --- VISUALIZATION B: DRAW THE LINE ---
-                        visualization_msgs::msg::Marker line_marker;
-                        line_marker.header.frame_id = "camera_init";
-                        line_marker.header.stamp = this->now();
-                        line_marker.ns = "sc_loop_lines";
-                        line_marker.id = keyframe_count;
-                        line_marker.type = visualization_msgs::msg::Marker::LINE_LIST;
-                        line_marker.action = visualization_msgs::msg::Marker::ADD;
-                        line_marker.scale.x = 0.05; 
-                        line_marker.color.r = 0.0; line_marker.color.g = 1.0; line_marker.color.b = 0.0; line_marker.color.a = 1.0;
+                    // 2. CHECK FOR LOOP CLOSURE
+                    auto result = scManager.detectLoopClosureID();
+                    int loop_index = std::get<0>(result); // The ID of the old match (-1 if none)
+                    double loop_score = std::get<2>(result); // The distance score
 
-                        geometry_msgs::msg::Point p1, p2;
-                        p1.x = state_point.pos(0); p1.y = state_point.pos(1); p1.z = state_point.pos(2);
-                        p2.x = p_old(0); p2.y = p_old(1); p2.z = p_old(2);
-                        line_marker.points.push_back(p1);
-                        line_marker.points.push_back(p2);
-                        pubSCLoopLines->publish(line_marker);
+                    // 3. VERIFY: Ask ICP
+                    float fitness_score = 1000.0f; // Default to "Bad"
+                    Eigen::Matrix4f icp_transform = Eigen::Matrix4f::Identity();
 
-                        RCLCPP_INFO(this->get_logger(), "LOOP FOUND: Frame %d <--> Frame %d", keyframe_count, loop_index);
-                        
-                        // Log to file
-                        if (loop_log.is_open()) {
-                            double pos_drift = (keyframePoses[loop_index] - state_point.pos).norm();
-                            loop_log << std::fixed << std::setprecision(6) 
-                                     << lidar_end_time << "," 
-                                     << keyframe_count << "," 
-                                     << loop_index << "," 
-                                     << loop_score << "," 
-                                     << std::get<1>(result) << ","
-                                     << pos_drift << "\n";
-                            loop_log.flush(); // Force write to disk immediately
+                    if (loop_index != -1) {
+                        // A potential loop was found! Let's verify it.
+                        if (loop_index >= 0 && loop_index < (int)keyframeClouds.size()) {
+                            pcl::PointCloud<PointType>::Ptr history_cloud = keyframeClouds[loop_index];
+                            fitness_score = perform_icp_verification(this_cloud_copy, history_cloud, icp_transform);
+                            
+                            RCLCPP_INFO(this->get_logger(), "Loop Candidate: %d <-> %d. SC Score: %.4f, ICP Score: %.4f", 
+                                        keyframe_count, loop_index, loop_score, fitness_score);
                         }
                     }
+
+                    // 4. DECIDE: Only draw Green Line if Score is Good (< 0.3)
+                    float r=1.0, g=0.0, b=0.0; // Default Red
+                    bool loop_verified = false;
+
+                    if (loop_index != -1 && fitness_score < 0.3) {
+                        // VALID LOOP CONFIRMED!
+                        loop_verified = true;
+                        r=0.0; g=1.0; b=0.0; 
+                        
+                        // --- VISUALIZATION A: REPAINT OLD MARKER GREEN ---
+                        // We republish the OLD marker ID with a new color
+                        visualization_msgs::msg::Marker old_marker;
+                        old_marker.header.frame_id = "camera_init";
+                        old_marker.header.stamp = this->now();
+                        old_marker.ns = "sc_keyframes";
+                        old_marker.id = loop_index; // REUSE OLD ID
+                        old_marker.type = visualization_msgs::msg::Marker::SPHERE;
+                        old_marker.action = visualization_msgs::msg::Marker::ADD; // "ADD" overwrites the old one
+                        
+                        // Get Old Position from our Vector
+                        if (loop_index < (int)keyframePoses.size()) {
+                            Eigen::Vector3d p_old = keyframePoses[loop_index];
+                            old_marker.pose.position.x = p_old(0);
+                            old_marker.pose.position.y = p_old(1);
+                            old_marker.pose.position.z = p_old(2);
+                            old_marker.scale.x = 0.5; old_marker.scale.y = 0.5; old_marker.scale.z = 0.5; // Make it BIGGER
+                            old_marker.color.r = 0.0; old_marker.color.g = 1.0; old_marker.color.b = 0.0; old_marker.color.a = 1.0;
+                            pubSCKeyframes->publish(old_marker);
+
+                            // --- VISUALIZATION B: DRAW THE LINE ---
+                            visualization_msgs::msg::Marker line_marker;
+                            line_marker.header.frame_id = "camera_init";
+                            line_marker.header.stamp = this->now();
+                            line_marker.ns = "sc_loop_lines";
+                            line_marker.id = keyframe_count;
+                            line_marker.type = visualization_msgs::msg::Marker::LINE_LIST;
+                            line_marker.action = visualization_msgs::msg::Marker::ADD;
+                            line_marker.scale.x = 0.05; 
+                            line_marker.color.r = 0.0; line_marker.color.g = 1.0; line_marker.color.b = 0.0; line_marker.color.a = 1.0;
+
+                            geometry_msgs::msg::Point p1, p2;
+                            p1.x = state_point.pos(0); p1.y = state_point.pos(1); p1.z = state_point.pos(2);
+                            p2.x = p_old(0); p2.y = p_old(1); p2.z = p_old(2);
+                            line_marker.points.push_back(p1);
+                            line_marker.points.push_back(p2);
+                            pubSCLoopLines->publish(line_marker);
+
+                            RCLCPP_INFO(this->get_logger(), ">>> VALID LOOP ACCEPTED! <<<");
+                        }
+                    }
+
+                    // 5. PUBLISH CURRENT MARKER (Red normally, Green if loop found)
+                    visualization_msgs::msg::Marker marker;
+                    marker.header.frame_id = "camera_init";
+                    marker.header.stamp = this->now();
+                    marker.ns = "sc_keyframes";
+                    marker.id = keyframe_count;
+                    marker.type = visualization_msgs::msg::Marker::SPHERE;
+                    marker.action = visualization_msgs::msg::Marker::ADD;
+                    marker.pose.position.x = state_point.pos(0);
+                    marker.pose.position.y = state_point.pos(1);
+                    marker.pose.position.z = state_point.pos(2);
+                    marker.scale.x = 0.3; marker.scale.y = 0.3; marker.scale.z = 0.3;
+                    marker.color.r = r; marker.color.g = g; marker.color.b = b; marker.color.a = 1.0;
+                    pubSCKeyframes->publish(marker);
+
+                    // Log to file (Moved outside to log ALL attempts for debugging)
+                    if (loop_log.is_open()) {
+                        double pos_drift = 0.0;
+                        // Only calculate drift if we actually found a loop
+                        if (loop_index != -1 && loop_index < (int)keyframePoses.size()) {
+                            pos_drift = (keyframePoses[loop_index] - state_point.pos).norm();
+                        }
+                        loop_log << std::fixed << std::setprecision(6) 
+                                << lidar_end_time << "," 
+                                << keyframe_count << "," 
+                                << loop_index << "," 
+                                << loop_score << ","
+                                << fitness_score << ","
+                                << (loop_verified ? 1 : 0) << ","
+                                << std::get<1>(result) << ","
+                                << pos_drift << "\n";
+                        loop_log.flush(); // Force write to disk immediately
+                    }
+
+                    // 6. Save the 2D Image to File
+                    Eigen::MatrixXd current_sc = scManager.getConstRefRecentSCD();
+                    save_scan_context_to_file(current_sc, lidar_end_time);
+                    
+                    keyframe_count++;
+                    // ---------------------------------------------------- END
                 }
-
-                // 4. PUBLISH CURRENT MARKER (Red normally, Green if loop found)
-                visualization_msgs::msg::Marker marker;
-                marker.header.frame_id = "camera_init";
-                marker.header.stamp = this->now();
-                marker.ns = "sc_keyframes";
-                marker.id = keyframe_count;
-                marker.type = visualization_msgs::msg::Marker::SPHERE;
-                marker.action = visualization_msgs::msg::Marker::ADD;
-                marker.pose.position.x = state_point.pos(0);
-                marker.pose.position.y = state_point.pos(1);
-                marker.pose.position.z = state_point.pos(2);
-                marker.scale.x = 0.3; marker.scale.y = 0.3; marker.scale.z = 0.3;
-                marker.color.r = r; marker.color.g = g; marker.color.b = b; marker.color.a = 1.0;
-                pubSCKeyframes->publish(marker);
-
-                // 5. Save the 2D Image to File
-                Eigen::MatrixXd current_sc = scManager.getConstRefRecentSCD();
-                save_scan_context_to_file(current_sc, lidar_end_time);
-                
-                keyframe_count++;
-                // ---------------------------------------------------- END
             }
             // ==========================================
             
@@ -1369,6 +1440,7 @@ private:
     rclcpp::Service<std_srvs::srv::Trigger>::SharedPtr map_save_srv_;
 
     bool effect_pub_en = false, map_pub_en = false;
+    bool loop_closure_en = false;
     int effect_feat_num = 0, frame_num = 0;
     double deltaT, deltaR, aver_time_consu = 0, aver_time_icp = 0, aver_time_match = 0, aver_time_incre = 0, aver_time_solve = 0, aver_time_const_H_time = 0;
     bool flg_EKF_converged, EKF_stop_flg = 0;

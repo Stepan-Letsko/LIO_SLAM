@@ -66,6 +66,7 @@ public:
 
     // User-side API
     void makeAndSaveScancontextAndKeys( pcl::PointCloud<SCPointType> & _scan_down );
+    // STEPAN LETSKO
     std::tuple<int, float, double> detectLoopClosureID( void ); // int: nearest node index, float: relative yaw, double: score
     const Eigen::MatrixXd& getConstRefRecentSCD() const { return polarcontexts_.back(); }
 
