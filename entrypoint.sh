@@ -4,6 +4,19 @@ set -e
 # Source the ROS 2 environment
 source /opt/ros/humble/setup.bash
 
+# AUTOMATIC SUBMODULE FIX
+# If the .git directory is mounted, we can check and update submodules.
+if [ -d "/root/ros2_ws/.git" ]; then
+    # Mark the directory as safe for git (since ownership might differ between host and container)
+    git config --global --add safe.directory /root/ros2_ws
+    
+    # Check if the submodule directory exists but is empty
+    if [ -d "src/livox_ros_driver" ] && [ -z "$(ls -A src/livox_ros_driver)" ]; then
+        echo "[Entrypoint] Detected empty submodule. Initializing..."
+        git submodule update --init --recursive
+    fi
+fi
+
 # Define the path to the driver
 DRIVER_DIR="/root/ros2_ws/src/livox_ros_driver"
 
