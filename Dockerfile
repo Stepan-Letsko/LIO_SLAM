@@ -89,12 +89,21 @@ RUN mkdir -p src && \
     colcon build --packages-select sbg_driver && \
     rm -rf /var/lib/apt/lists/*
 
-# 6. Install evo for trajectory evaluation
+# 6. Install Hesai ROS2 Driver
+# Clone source, install dependencies, and build
+RUN git clone --recursive https://github.com/HesaiTechnology/HesaiLidar_ROS_2.0.git src/HesaiLidar_ROS_2.0 && \
+    apt-get update && \
+    rosdep install --from-path src --ignore-src -y && \
+    . /opt/ros/humble/setup.sh && \
+    colcon build --packages-select hesai_ros_driver && \
+    rm -rf /var/lib/apt/lists/*
+
+# 7. Install evo for trajectory evaluation
 RUN apt-get update && apt-get install -y python3-pip && \
     pip3 install evo --upgrade --no-binary evo && \
     rm -rf /var/lib/apt/lists/*
 
-# 6. Setup Entrypoint
+# 8. Setup Entrypoint
 # Copy the entrypoint script into the image
 COPY entrypoint.sh /entrypoint.sh
 # Make it executable
