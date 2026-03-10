@@ -1,0 +1,42 @@
+lidar:
+  - driver:
+      use_gpu: false
+      source_type: 1                                  # 1 = real-time lidar connection
+      lidar_udp_type:
+        device_ip_address: 192.168.1.201              # The IP of the Hesai LiDAR sensor itself.
+        udp_port: 2368                                # UDP destination port
+        ptc_port: 9347                                # PTC port of lidar
+        multicast_ip_address: 255.255.255.255
+        use_ptc_connected: true                       # Set to false when ptc connection is not used
+        host_ptc_port: 0                              # PTC source port, 0 means auto
+        recv_point_cloud_timeout: -1                  # The timeout of receiving point cloud
+        ptc_connect_timeout: -1                       # The timeout of ptc connection
+        host_ip_address: "192.168.1.100"              # Host IP.
+        fault_message_port: 0
+        standby_mode: -1                              # The standby mode: [-1] is invalit [0] in operation [1] standby
+        speed: -1                                     # The speed: [-1] invalit, you must make sure your set has been supported by the lidar you are using
+        ptc_mode: 0                                   # The ptc mode: [0] tcp [1] tcp_ssl
+      
+      # public module
+      use_timestamp_type: 0                 # 0 use point cloud timestamp; 1 use receive timestamp
+      frame_start_azimuth: 0
+      thread_num: 4
+      transform_flag: false
+      enable_packet_loss_tool: true         # enable the udp packet loss detection tool
+      distance_correction_flag: false       # set to true when optical centre correction needs to be turned on
+      xt_spot_correction: false             # Set to TRUE when XT S point cloud layering correction is required
+      device_udp_src_port: 0                # Filter point clouds for specified source ports in case of multiple lidar, setting >=1024
+      device_fault_port: 0                  # Filter fault message for specified source ports in case of multiple lidar, setting >=1024
+      frame_frequency: 0
+      default_frame_frequency: 10.0         # The default frequency that point cloud sends.
+      echo_mode_filter: 0                   # return mode filter
+
+    ros:
+      ros_frame_id: hesai_lidar                       # Frame id of packet message and point cloud message
+      ros_send_packet_topic: /lidar_packets           # Topic used to send lidar raw packets through ROS
+      ros_send_point_cloud_topic: /lidar_points       # Topic for FAST-LIO
+      ros_send_imu_topic: /lidar_imu                  # Topic used to send lidar imu message
+      ros_send_packet_loss_topic: /lidar_packets_loss # Topic used to monitor packets loss condition through ROS
+      send_packet_ros: false                          # true: Send packets through ROS 
+      send_point_cloud_ros: true                      # true: Send point cloud through ROS    
+      send_imu_ros: false                             # false: Use the SBG Ellipse IMU instead

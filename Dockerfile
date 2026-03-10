@@ -37,6 +37,12 @@ RUN apt-get update && \
     ros-humble-foxglove-bridge \
     # Tools to download missing headers
     wget \
+    libboost-all-dev \
+    libyaml-cpp-dev \
+    libpcap-dev \
+    # Network tools for debugging (ping, ifconfig)
+    iputils-ping \
+    net-tools \
     && rm -rf /var/lib/apt/lists/*
     # Clean up the apt cache to keep the Docker image size small
 
@@ -81,7 +87,7 @@ RUN apt-get update && apt-get install -y \
 # 5. Install SBG ROS2 Driver
 # Clone source, install dependencies (fixing the libapr1-dev issue), and build
 RUN mkdir -p src && \
-    git clone https://github.com/SBG-Systems/sbg_ros2_driver.git src/sbg_ros2_driver && \
+    git clone --recursive https://github.com/SBG-Systems/sbg_ros2_driver.git src/sbg_ros2_driver && \
     apt-get update && \
     rosdep update && \
     rosdep install --from-path src --ignore-src -y && \

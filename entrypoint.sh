@@ -10,11 +10,9 @@ if [ -d "/root/ros2_ws/.git" ]; then
     # Mark the directory as safe for git (since ownership might differ between host and container)
     git config --global --add safe.directory /root/ros2_ws
     
-    # Check if the submodule directory exists but is empty
-    if [ -d "src/livox_ros_driver" ] && [ -z "$(ls -A src/livox_ros_driver)" ]; then
-        echo "[Entrypoint] Detected empty submodule. Initializing..."
-        git submodule update --init --recursive
-    fi
+    echo "[Entrypoint] Initializing/updating git submodules..."
+    # This command initializes any submodules that haven't been cloned yet and pulls the latest commit.
+    git submodule update --init --recursive
 fi
 
 # Define the path to the driver
