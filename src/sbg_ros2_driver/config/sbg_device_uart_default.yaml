@@ -21,7 +21,7 @@
       initFrameId: "map"
 
     # Configuration of the device with ROS.
-    confWithRos: false
+    confWithRos: true
     
     # Uart configuration
     uartConf:
@@ -256,7 +256,8 @@
 
       # Ros standard output:
       # Note: If true publish ROS standard messages.
-      ros_standard: false
+      # Note: If true publish ROS standard messages (like /imu/data).
+      ros_standard: true
 
       # Frame convention:
       # Note: If true messages are expressed in the ENU convention.
@@ -273,7 +274,7 @@
       # Status general, clock, com aiding, solution, heave
       log_status: 200
       # Includes IMU status, acc., gyro, temp delta speeds and delta angles values
-      log_imu_data: 8
+      log_imu_data: 1
       # Includes roll, pitch, yaw and their accuracies on each axis
       log_ekf_euler: 8
       # Includes the 4 quaternions values
