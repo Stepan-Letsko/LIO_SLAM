@@ -29,12 +29,12 @@
       portName: "/dev/ttyUSB0"
     
       # Baud rate (4800 ,9600 ,19200 ,38400 ,115200 [default],230400 ,460800 ,921600)
-      baudRate: 115200
+      baudRate: 921600
 
       # List of fallback baud rates to test if configured baud rate doesn't work.
-      # fallbackBaudRates:
-      #   - 460800
-      #   - 921600
+      fallbackBaudRates:
+        - 115200
+        - 460800
 
       # Port Id
       # 0 PORT_A: Main communication interface. Full duplex.
@@ -109,7 +109,7 @@
       # 2 Module connected on PORT_C
       # 3 Module connected on PORT_D
       # 5 Module is connected internally
-      gnss1ModulePortAssignment: 255
+      gnss1ModulePortAssignment: 5
       # GNSS module sync assignment:
       # 0 Module is disabled
       # 1 Synchronization is done using SYNC_IN_A pin
@@ -255,7 +255,6 @@
       time_reference: "ros"
 
       # Ros standard output:
-      # Note: If true publish ROS standard messages.
       # Note: If true publish ROS standard messages (like /imu/data).
       ros_standard: true
 
@@ -264,12 +263,12 @@
       #
       # true : ENU convention (X east, Y north, Z up)
       # false (default): NED convention (X north, Y east, Z down)
-      use_enu: false
+      use_enu: true
 
       # Frame ID:
       # Note: If the frame convention is NED so the default frame ID is (imu_link_ned)
       #       else if the convention is ENU so the default frame ID is (imu_link)
-      frame_id: "imu_link_ned"
+      frame_id: "imu_link"
     
       # Status general, clock, com aiding, solution, heave
       log_status: 200
@@ -278,7 +277,7 @@
       # Includes roll, pitch, yaw and their accuracies on each axis
       log_ekf_euler: 8
       # Includes the 4 quaternions values
-      log_ekf_quat: 8
+      log_ekf_quat: 1
       # Position and velocities in NED coordinates with the accuracies on each axis
       log_ekf_nav: 8
       # Velocity expressed in the INS body/vehicle frame
@@ -313,7 +312,7 @@
       # Air data
       log_air_data: 0
       # Short IMU data
-      log_imu_short: 8
+      log_imu_short: 0
 
     rtcm:
       # Should ros driver subscribe to RTCM topic

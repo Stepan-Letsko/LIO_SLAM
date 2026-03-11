@@ -18,6 +18,8 @@ services:
     # This is crucial for ROS 2 because it allows the container to share IP and ports
     # with the laptop/Pi, enabling communication with external hardware or other ROS nodes.
     network_mode: host
+    # Allow Shared Memory (SHM) access to fix ROS 2 FastDDS errors with large data
+    ipc: host
     # Run in privileged mode to give the container full access to the host's devices.
     # This is required to access USB devices like the Livox LiDAR.
     privileged: true

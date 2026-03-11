@@ -92,7 +92,7 @@ RUN mkdir -p src && \
     rosdep update && \
     rosdep install --from-path src --ignore-src -y && \
     . /opt/ros/humble/setup.sh && \
-    colcon build --packages-select sbg_driver && \
+    colcon build --packages-select sbg_driver --cmake-args -DCMAKE_BUILD_TYPE=Release && \
     rm -rf /var/lib/apt/lists/*
 
 # 6. Install Hesai ROS2 Driver
@@ -101,7 +101,7 @@ RUN git clone --recursive https://github.com/HesaiTechnology/HesaiLidar_ROS_2.0.
     apt-get update && \
     rosdep install --from-path src --ignore-src -y && \
     . /opt/ros/humble/setup.sh && \
-    colcon build --packages-select hesai_ros_driver && \
+    colcon build --packages-select hesai_ros_driver --cmake-args -DCMAKE_BUILD_TYPE=Release && \
     rm -rf /var/lib/apt/lists/*
 
 # 7. Install evo for trajectory evaluation

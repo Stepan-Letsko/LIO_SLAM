@@ -6,12 +6,12 @@ lidar:
         device_ip_address: 192.168.1.201              # The IP of the Hesai LiDAR sensor itself.
         udp_port: 2368                                # UDP destination port
         ptc_port: 9347                                # PTC port of lidar
-        multicast_ip_address: 255.255.255.255
+        multicast_ip_address: ""
         use_ptc_connected: true                       # Set to false when ptc connection is not used
         host_ptc_port: 0                              # PTC source port, 0 means auto
         recv_point_cloud_timeout: -1                  # The timeout of receiving point cloud
         ptc_connect_timeout: -1                       # The timeout of ptc connection
-        host_ip_address: "192.168.1.100"              # Host IP.
+        host_ip_address: ""                           # Host IP.
         fault_message_port: 0
         standby_mode: -1                              # The standby mode: [-1] is invalit [0] in operation [1] standby
         speed: -1                                     # The speed: [-1] invalit, you must make sure your set has been supported by the lidar you are using
@@ -22,7 +22,7 @@ lidar:
       frame_start_azimuth: 0
       thread_num: 4
       transform_flag: false
-      enable_packet_loss_tool: true         # enable the udp packet loss detection tool
+      enable_packet_loss_tool: false        # enable the udp packet loss detection tool
       distance_correction_flag: false       # set to true when optical centre correction needs to be turned on
       xt_spot_correction: false             # Set to TRUE when XT S point cloud layering correction is required
       device_udp_src_port: 0                # Filter point clouds for specified source ports in case of multiple lidar, setting >=1024
