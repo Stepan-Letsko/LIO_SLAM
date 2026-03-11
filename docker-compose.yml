@@ -33,8 +33,6 @@ services:
     volumes:
       # Map the source code folder so you can edit code on your laptop and see it in Docker.
       - ./src:/root/ros2_ws/src
-      # Map the .git folder so the container can manage submodules
-      - ./.git:/root/ros2_ws/.git
       # Map build artifacts so they persist outside the container (optional, but good for caching).
       - ./build:/root/ros2_ws/build
       # Map install artifacts so sourced setup files persist.
