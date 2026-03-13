@@ -1,6 +1,9 @@
 #include "preprocess.h"
-
+#include <common_lib.h>
+#include <pcl_conversions/pcl_conversions.h>
 #include <pcl/common/common.h>
+#include <sensor_msgs/point_cloud2_iterator.hpp>
+#include <cmath> // For std::isfinite
 
 #define RETURN0 0x00
 #define RETURN0AND1 0x10
@@ -83,6 +86,68 @@ void Preprocess::process(const sensor_msgs::msg::PointCloud2::UniquePtr &msg, Po
 
     case MID360:
       mid360_handler(msg);
+      break;
+
+    case 5: // Hesai LiDAR (lidar_type: 5)
+      {
+        pl_surf.clear();
+        pl_corn.clear();
+        pl_full.clear();
+
+        int plsize = msg->width * msg->height;
+        if (plsize == 0) break;
+        
+        pl_surf.reserve(plsize);
+
+        // Map iterators directly to the ROS message memory layout
+        sensor_msgs::PointCloud2ConstIterator<float> iter_x(*msg, "x");
+        sensor_msgs::PointCloud2ConstIterator<float> iter_y(*msg, "y");
+        sensor_msgs::PointCloud2ConstIterator<float> iter_z(*msg, "z");
+        sensor_msgs::PointCloud2ConstIterator<float> iter_intensity(*msg, "intensity");
+        sensor_msgs::PointCloud2ConstIterator<double> iter_time(*msg, "timestamp");
+
+        // Extract the absolute base time from the very first point
+        // SAFETY: Find the first valid timestamp > 0 to use as base.
+        // If the first point is 0/garbage, using it as base ruins the relative time for valid points.
+        double time_base = 0.0;
+        auto temp_iter_time = iter_time;
+        for (int k = 0; k < plsize; ++k, ++temp_iter_time) {
+            if (*temp_iter_time > 1000.0) { // Assume valid UNIX time is > 1000s
+                time_base = *temp_iter_time;
+                break;
+            }
+        }
+
+        for (int i = 0; i < plsize; ++i, ++iter_x, ++iter_y, ++iter_z, ++iter_intensity, ++iter_time)
+        {
+            if (i % point_filter_num != 0) continue;
+            // Note: Iterators are incremented in the loop definition, so we just skip the body
+
+            // SAFETY: Filter NaNs (Critical for KD-Tree stability)
+            if (!std::isfinite(*iter_x) || !std::isfinite(*iter_y) || !std::isfinite(*iter_z) || !std::isfinite(*iter_time)) continue;
+
+            // Check range (NaN checks above ensure these comparisons work safely)
+            double range = (*iter_x * *iter_x) + (*iter_y * *iter_y) + (*iter_z * *iter_z);            
+            if (range < (blind * blind)) continue;
+
+            PointType added_pt;
+            added_pt.x = *iter_x;
+            added_pt.y = *iter_y;
+            added_pt.z = *iter_z;
+            added_pt.intensity = *iter_intensity;
+            added_pt.normal_x = 0; added_pt.normal_y = 0; added_pt.normal_z = 0;
+            
+            // SAFETY: Calculate relative time and Clamp to [0.0, 150.0] ms
+            // This prevents "50-year integration" bugs if a timestamp is corrupt.
+            double rel_time = (*iter_time - time_base) * 1000.0;
+            if (rel_time < 0.0) rel_time = 0.0;
+            if (rel_time > 150.0) rel_time = 150.0; // Clamp to 150ms (scan is 100ms)
+            
+            added_pt.curvature = rel_time;
+            
+            pl_surf.points.push_back(added_pt);
+        }
+      }
       break;
 
     default:

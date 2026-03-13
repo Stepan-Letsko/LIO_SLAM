@@ -8,6 +8,7 @@
 #include <fast_lio/msg/pose6_d.hpp>
 #include <sensor_msgs/msg/imu.hpp>
 #include <nav_msgs/msg/odometry.hpp>
+#include <deque>
 
 using namespace std;
 using namespace Eigen;
@@ -31,6 +32,20 @@ using namespace Eigen;
 #define STD_VEC_FROM_EIGEN(mat)  vector<decltype(mat)::Scalar> (mat.data(), mat.data() + mat.rows() * mat.cols())
 #define DEBUG_FILE_DIR(name)     (string(string(ROOT_DIR) + "Log/"+ name))
 
+struct HesaiPointXYZIRT
+{
+    PCL_ADD_POINT4D
+    PCL_ADD_INTENSITY;
+    uint16_t ring;
+    double timestamp;
+    EIGEN_MAKE_ALIGNED_OPERATOR_NEW
+} EIGEN_ALIGN16;
+
+POINT_CLOUD_REGISTER_POINT_STRUCT (HesaiPointXYZIRT,
+    (float, x, x) (float, y, y) (float, z, z) (float, intensity, intensity)
+    (uint16_t, ring, ring) (double, timestamp, timestamp)
+)
+
 typedef fast_lio::msg::Pose6D Pose6D;
 typedef pcl::PointXYZINormal PointType;
 typedef pcl::PointCloud<PointType> PointCloudXYZI;
@@ -45,10 +60,10 @@ typedef Matrix3f M3F;
 #define MF(a,b)  Matrix<float, (a), (b)>
 #define VF(a)    Matrix<float, (a), 1>
 
-M3D Eye3d(M3D::Identity());
-M3F Eye3f(M3F::Identity());
-V3D Zero3d(0, 0, 0);
-V3F Zero3f(0, 0, 0);
+static M3D Eye3d(M3D::Identity());
+static M3F Eye3f(M3F::Identity());
+static V3D Zero3d(0, 0, 0);
+static V3F Zero3f(0, 0, 0);
 
 struct MeasureGroup     // Lidar data and imu dates for the curent process
 {
@@ -215,7 +230,7 @@ bool esti_normvector(Matrix<T, 3, 1> &normvec, const PointVector &point, const T
     return true;
 }
 
-float calc_dist(PointType p1, PointType p2){
+inline float calc_dist(PointType p1, PointType p2){
     float d = (p1.x - p2.x) * (p1.x - p2.x) + (p1.y - p2.y) * (p1.y - p2.y) + (p1.z - p2.z) * (p1.z - p2.z);
     return d;
 }
@@ -254,12 +269,12 @@ bool esti_plane(Matrix<T, 4, 1> &pca_result, const PointVector &point, const T &
     return true;
 }
 
-double get_time_sec(const builtin_interfaces::msg::Time &time)
+inline double get_time_sec(const builtin_interfaces::msg::Time &time)
 {
     return rclcpp::Time(time).seconds();
 }
 
-rclcpp::Time get_ros_time(double timestamp)
+inline rclcpp::Time get_ros_time(double timestamp)
 {
     int32_t sec = std::floor(timestamp);
     auto nanosec_d = (timestamp - std::floor(timestamp)) * 1e9;

@@ -5,56 +5,50 @@
 
 /**:
     ros__parameters:
-        feature_extract_enable: false    # false: Use all points (better for dense maps). true: Extract edge/surf features (faster, less dense).
-        point_filter_num: 1              # Downsampling ratio. 1 = use all points. 2 = use every 2nd point. Higher = faster but less detail.
-        max_iteration: 3                 # Number of Kalman Filter iterations per scan. 3 is standard.
-        filter_size_surf: 0.5            # Voxel size for downsampling the current scan (meters). 0.2m keeps good detail.
-        filter_size_map: 0.5             # Voxel size for the global map (meters). Controls map density.
-        cube_side_length: 1000.0         # Size of the local map box around the robot. 1000m is effectively infinite.
-        runtime_pos_log_enable: false    # true: Save a CSV log of position/time stats.
-        map_file_path: "/root/ros2_ws/bags/hesai_map.pcd" # Absolute path where the final map will be saved.
-        loop_closure_enable: true        # Enable the loop closure module we just integrated
+        feature_extract_enable: false
+        point_filter_num: 3          # INCREASED: Reduce CPU load (take 1 point every 4)
+        max_iteration: 3
+        filter_size_surf: 1.0
+        filter_size_map: 0.5
+        cube_side_length: 1000.0
+        runtime_pos_log_enable: true
+        map_file_path: "./RAM_TEST.pcd"
+        loop_closure_enable: false  # Set to false to run standard FAST-LIO
 
         common:
-            # Hilti 2023 Bag Topics:
-            # lid_topic:  "/hesai/pandar"  # Topic name for LiDAR point cloud
-            # imu_topic:  "/alphasense/imu"      # Topic name for IMU data
-            
-            # For my Real Hardware (Uncomment later):
-            lid_topic:  "/hesai/pandar"
-            imu_topic:  "/imu/data"
-
-            time_sync_en: false          # Only set to true if hardware time sync is missing (software sync).
-            time_offset_lidar_to_imu: 0.00158 # Time offset in seconds. Leave 0.0 unless calibrate it manually.
+            lid_topic:  "/lidar_points" # Updated to Hesai ROS 2 driver output
+            imu_topic:  "/imu/data"     # Updated to SBG ROS 2 standard ENU output
+            time_sync_en: false         # ONLY turn on when external time synchronization is really not possible
+            time_offset_lidar_to_imu: 0.0 # Time offset between lidar and IMU calibrated by other algorithms, e.g. LI-Init (can be found in README).
+                                        # This param will take effect no matter what time_sync_en is. So if the time offset is not known exactly, please set as 0.0
 
         preprocess:
-            lidar_type: 2                # 1: Livox (CustomMsg), 2: Standard ROS PointCloud2 (Hesai/Velodyne), 3: Ouster
-            scan_line: 32                # Number of lasers. 32 for Hilti bag. Change to 16 for my XT-16.
-            blind: 0.5                   # Blind spot radius in meters. Points closer than this are ignored (robot body).
-            scan_rate: 10                # Frequency of LiDAR scans (Hz). Hesai is usually 10Hz.
-            timestamp_unit: 2           # Unit of the 'time' field in PointCloud2. 0: sec, 1: ms, 2: us, 3: ns.
+            lidar_type: 5                # 1 for Livox serials LiDAR, 2 for Velodyne/Generic Mechanical LiDAR, 3 for ouster LiDAR, 4 for Hesai XT (ID 5)
+            scan_line: 16                # Updated for Hesai XT16 (16 laser rings)
+            scan_rate: 10                # only need to be set for velodyne, unit: Hz,
+            timestamp_unit: 0            # the unit of time/t field in the PointCloud2 rostopic: 0-second, 1-milisecond, 2-microsecond, 3-nanosecond.
+            blind: 0.5                   # Adjusted to ignore UAV frame/propeller interference
 
         mapping:
-            acc_cov: 0.0001688956                 # IMU accelerometer covariance (trust in IMU acceleration).
-            gyr_cov: 0.0010679343                 # IMU gyroscope covariance (trust in IMU rotation).
-            b_acc_cov: 0.0000009783            # Accelerometer bias random walk.
-            b_gyr_cov: 0.0000265416            # Gyroscope bias random walk.
-            fov_degree:    360.0         # Field of View. Hesai is 360 degrees.
-            det_range:     100.0         # Maximum range to use for mapping (meters).
-            extrinsic_est_en:  false      # true: Automatically calibrate the rotation/translation between LiDAR and IMU during run.
-            extrinsic_T:  [-0.00673, -0.00689, 0.04989] # Initial guess for translation (x, y, z) from IMU to LiDAR.
-            extrinsic_R: [ 1., 0., 0., 
-                           0., 1., 0., 
-                           0., 0., 1.]
+            acc_cov: 0.1
+            gyr_cov: 0.1
+            b_acc_cov: 0.0001
+            b_gyr_cov: 0.0001
+            fov_degree:    360.0
+            det_range:     120.0         # Updated to Hesai XT16 max detection range
+            extrinsic_est_en:  false     # true: enable the online estimation of IMU-LiDAR extrinsic,
+            extrinsic_T: [ 0.0, -0.106368, 0.052867 ]
+            extrinsic_R: [ 1.0, 0.0, 0.0, 
+                           0.0, 1.0, 0.0, 
+                           0.0, 0.0, 1.0 ]
 
-                          # Initial guess for rotation matrix (Identity matrix = no rotation).
         publish:
-            path_en:  true               # Publish the robot's path (trajectory) to Rviz.
-            map_en: false                # Publish the full global map to Rviz? (Keep false to save CPU/Network).
-            scan_publish_en:  true       # Publish the current scan (registered to world frame).
-            dense_publish_en: true       # true: Publish all points. false: Publish downsampled points.
-            scan_bodyframe_pub_en: true  # Publish the scan in the body frame (stabilized view).
+            path_en:  true
+            scan_publish_en:  true       # false: close all the point cloud output
+            dense_publish_en: true       # false: low down the points number in a global-frame point clouds scan.
+            scan_bodyframe_pub_en: true  # true: output the point cloud scans in IMU-body-frame
 
         pcd_save:
-            pcd_save_en: true            # Enable saving the map to a PCD file at the end.
-            interval: 10                 # -1: Save all frames into one big file. N: Save every N frames.
+            pcd_save_en: false
+            interval: -1                 # how many LiDAR frames saved in each pcd file; 
+                                        # -1 : all frames will be saved in ONE pcd file, may lead to memory crash when having too much frames.
