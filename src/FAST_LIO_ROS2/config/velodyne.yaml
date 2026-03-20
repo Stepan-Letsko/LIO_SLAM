@@ -1,18 +1,18 @@
 /**:
     ros__parameters:
         feature_extract_enable: false
-        point_filter_num: 3
+        point_filter_num: 5
         max_iteration: 3
-        filter_size_surf: 0.5
-        filter_size_map: 0.5
+        filter_size_surf: 1.0
+        filter_size_map: 1.0
         cube_side_length: 1000.0
         runtime_pos_log_enable: true
         map_file_path: "./RAM_TEST.pcd"
-        loop_closure_enable: true  # Set to false to run standard FAST-LIO
+        loop_closure_enable: false  # Set to false to run standard FAST-LIO
 
         common:
             lid_topic:  "points_raw"
-            imu_topic:  "imu/data"
+            imu_topic:  "imu_raw"
             time_sync_en: false         # ONLY turn on when external time synchronization is really not possible
             time_offset_lidar_to_imu: 0.0 # Time offset between lidar and IMU calibrated by other algorithms, e.g. LI-Init (can be found in README).
                                         # This param will take effect no matter what time_sync_en is. So if the time offset is not known exactly, please set as 0.0

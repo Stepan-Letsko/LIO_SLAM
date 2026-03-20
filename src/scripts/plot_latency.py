@@ -1,4 +1,6 @@
 import pandas as pd
+import matplotlib
+matplotlib.use('Agg') # Use headless backend to prevent X11 display errors
 import matplotlib.pyplot as plt
 import sys
 import os
