@@ -8,6 +8,9 @@ import re
 import csv
 import threading
 import psutil
+import yaml
+import matplotlib
+matplotlib.use('Agg') # Use headless backend to prevent X11 display errors
 import pandas as pd
 import matplotlib.pyplot as plt
 import shutil
@@ -16,21 +19,24 @@ from pathlib import Path
 # ==========================================
 # CONFIGURATION
 # ==========================================
-RESULTS_BASE = Path("/root/ros2_ws/src/results/full_analysis_results")
+RESULTS_BASE = Path("/mnt/usb/results/full_analysis_results")
 # The map name defined in your yaml (usually ./scans.pcd or ./RAM_TEST.pcd)
-EXPECTED_PCD_NAME = "Current_map.pcd" 
+EXPECTED_PCD_NAME = "Current_map.pcd"
 FAST_LIO_LOG_PATH = Path("/root/ros2_ws/src/FAST_LIO_ROS2/Log/fast_lio_time_log.csv")
+CONFIG_DIR = Path("/root/ros2_ws/src/FAST_LIO_ROS2/config")
 BAG_TO_TUM_SCRIPT = Path(__file__).parent / "bag_to_tum.py"
 BAG_TO_PCD_SCRIPT = Path(__file__).parent / "bag_to_pcd.py"
 
 class FastLioAnalyzer:
-    def __init__(self, bag_path, config_file, use_decoder=False, start_offset=0.0, duration=None):
+    def __init__(self, bag_path, config_file, use_decoder=False, start_offset=0.0, duration=None, record_mode='outputs', skip_pcd=False):
         self.bag_path = Path(bag_path)
         self.bag_name = self.bag_path.stem
         self.config_file = config_file
         self.use_decoder = use_decoder
         self.start_offset = start_offset
         self.duration = duration
+        self.record_mode = record_mode  # 'odometry', 'outputs', or 'inputs'
+        self.skip_pcd = skip_pcd
         self.output_dir = RESULTS_BASE / f"{self.bag_name}_FULL_ANALYSIS"
         
         # Data Containers
@@ -54,13 +60,39 @@ class FastLioAnalyzer:
             return 100.0
 
     def find_mapping_pid(self):
-        # Retry for 10 seconds to find the node
-        for _ in range(10):
-            for proc in psutil.process_iter(['pid', 'cmdline']):
-                if proc.info['cmdline'] and 'fastlio_mapping' in ' '.join(proc.info['cmdline']):
-                    return proc.info['pid']
+        # Only accept a fastlio_mapping process that was created AFTER we launched it.
+        # This prevents attaching to a stale process left over from a previous run.
+        for _ in range(15):
+            for proc in psutil.process_iter(['pid', 'cmdline', 'name', 'create_time']):
+                try:
+                    cmdline = ' '.join(proc.info['cmdline'] or [])
+                    if 'fastlio_mapping' in cmdline:
+                        age = time.time() - proc.info['create_time']
+                        if proc.info['create_time'] >= self.mapping_launch_time:
+                            print(f"   -> Monitoring PID {proc.info['pid']} ({proc.info['name']}): {cmdline[:100]}")
+                            return proc.info['pid']
+                        else:
+                            print(f"   -> Skipping stale fastlio_mapping PID {proc.info['pid']} (created {age:.1f}s ago, before this run)")
+                except (psutil.NoSuchProcess, psutil.AccessDenied):
+                    pass
             time.sleep(1)
+        print("   -> WARNING: fastlio_mapping process not found after 15s!")
         return None
+
+    def get_input_topics(self):
+        """Parse lid_topic and imu_topic from the FAST-LIO config YAML."""
+        config_path = CONFIG_DIR / self.config_file
+        try:
+            with open(config_path) as f:
+                cfg = yaml.safe_load(f)
+            common = cfg['/**']['ros__parameters']['common']
+            lid_topic = common['lid_topic'].strip()
+            imu_topic = common['imu_topic'].strip()
+            print(f"   -> Input topics from config: {lid_topic}, {imu_topic}")
+            return [lid_topic, imu_topic]
+        except Exception as e:
+            print(f"   -> Warning: Could not parse input topics from {config_path}: {e}")
+            return []
 
     def task_log_parser(self, process):
         """Thread 1: Reads stdout line-by-line for Latency metrics"""
@@ -91,11 +123,12 @@ class FastLioAnalyzer:
         """Thread 2: Polls CPU/RAM every 0.5s"""
         while self.mapping_pid is None and not self.stop_event.is_set():
             time.sleep(0.5)
-            
+
         if not self.mapping_pid: return
 
         try:
             proc = psutil.Process(self.mapping_pid)
+            print(f"   -> Resource monitor attached to: '{proc.name()}' (PID {self.mapping_pid})")
             start_t = time.time()
             
             while not self.stop_event.is_set():
@@ -228,19 +261,36 @@ class FastLioAnalyzer:
             proc_decoder = subprocess.Popen(decoder_cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
             time.sleep(2) # Give it a moment to initialize
 
-        # 1. Start Recording (Background) - Record Odometry, Cloud, and Path
+        # 1. Start Recording (Background)
         bag_out = self.output_dir / "recorded_bag"
         print("   -> Starting Recorder...")
-        rec_cmd = ['ros2', 'bag', 'record', '/Odometry', '/cloud_registered', '/path', '-o', str(bag_out)]
+        if self.record_mode == 'outputs':
+            topics = ['/Odometry', '/cloud_registered', '/path']
+        elif self.record_mode == 'inputs':
+            topics = self.get_input_topics()
+            if not topics:
+                print("   -> Warning: Falling back to /Odometry only.")
+                topics = ['/Odometry']
+        elif self.record_mode == 'all':
+            topics = None  # Use -a flag
+        else:  # 'odometry'
+            topics = ['/Odometry']
+        if topics is None:
+            print("   -> Recording ALL topics")
+            rec_cmd = ['ros2', 'bag', 'record', '-a', '-o', str(bag_out)]
+        else:
+            print(f"   -> Recording topics: {', '.join(topics)}")
+            rec_cmd = ['ros2', 'bag', 'record'] + topics + ['-o', str(bag_out)]
         proc_rec = subprocess.Popen(rec_cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
 
         # 2. Start FAST-LIO (Unbuffered)
         print(f"   -> Launching Node ({self.config_file})...")
         # stdbuf -oL forces line buffering so we can read logs instantly
-        launch_cmd = ['stdbuf', '-oL', 'ros2', 'launch', 'fast_lio', 'mapping.launch.py', 
-                      f'config_file:={self.config_file}', 
+        launch_cmd = ['stdbuf', '-oL', 'ros2', 'launch', 'fast_lio', 'mapping.launch.py',
+                      f'config_file:={self.config_file}',
                       'rviz:=false'
                       ]
+        self.mapping_launch_time = time.time()
         proc_mapping = subprocess.Popen(launch_cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
         
         # 3. Find PID
@@ -309,26 +359,41 @@ class FastLioAnalyzer:
         os.kill(proc_rec.pid, signal.SIGINT)
         os.kill(proc_mapping.pid, signal.SIGINT)
         if proc_decoder: os.kill(proc_decoder.pid, signal.SIGINT)
+
+        # Wait for the mapping node to fully exit so it doesn't linger as a stale
+        # process that find_mapping_pid() would attach to on the next run.
+        try:
+            proc_mapping.wait(timeout=15)
+        except subprocess.TimeoutExpired:
+            print("   -> WARNING: mapping process did not exit cleanly, force-killing.")
+            proc_mapping.kill()
         
         # Wait for threads
         t_log.join()
         t_res.join()
         
-        # Move Map File
-        if Path(EXPECTED_PCD_NAME).exists():
-            shutil.move(EXPECTED_PCD_NAME, self.output_dir / "final_map.pcd")
-            print("   -> Map Saved successfully.")
-        elif BAG_TO_PCD_SCRIPT.exists() and bag_out.exists():
-            print("   -> Reconstructing map from recorded bag (RAM Saving Mode)...")
-            pcd_out = self.output_dir / "final_map.pcd"
-            subprocess.run([
-                'python3', str(BAG_TO_PCD_SCRIPT), 
-                str(bag_out), 
-                '--topic', '/cloud_registered',
-                '--output', str(pcd_out),
-                '--voxel', '0.05'
-            ], check=True)
-            print(f"   -> Map reconstructed to {pcd_out.name}")
+        # Move Map File (only relevant in 'outputs' mode)
+        if self.record_mode == 'outputs':
+            if Path(EXPECTED_PCD_NAME).exists():
+                shutil.move(EXPECTED_PCD_NAME, self.output_dir / "final_map.pcd")
+                print("   -> Map Saved successfully.")
+            elif self.skip_pcd:
+                print("   -> Map reconstruction skipped (--skip-pcd).")
+            elif BAG_TO_PCD_SCRIPT.exists() and bag_out.exists():
+                print("   -> Reconstructing map from recorded bag (RAM Saving Mode)...")
+                pcd_out = self.output_dir / "final_map.pcd"
+                subprocess.run([
+                    'python3', str(BAG_TO_PCD_SCRIPT),
+                    str(bag_out),
+                    '--topic', '/cloud_registered',
+                    '--output', str(pcd_out),
+                    '--voxel', '0.05'
+                ], check=True)
+                print(f"   -> Map reconstructed to {pcd_out.name}")
+        else:
+            print(f"   -> Map reconstruction skipped (record mode: {self.record_mode}).")
+            if Path(EXPECTED_PCD_NAME).exists():
+                Path(EXPECTED_PCD_NAME).unlink()  # Cleanup native save if present
             
         # Extract Trajectory (TUM format) for Evo
         if BAG_TO_TUM_SCRIPT.exists() and bag_out.exists():
@@ -359,8 +424,14 @@ if __name__ == "__main__":
     parser.add_argument("--decoder", action="store_true", help="Launch Velodyne decoder (for raw packet bags like DARPA)")
     parser.add_argument("--start", type=float, default=0.0, help="Start offset in seconds")
     parser.add_argument("--duration", type=float, default=None, help="Duration to run in seconds (optional)")
-    
+    parser.add_argument("--record", choices=['odometry', 'outputs', 'inputs', 'all'], default='outputs',
+                        help="Recording mode: 'odometry' (just /Odometry), "
+                             "'outputs' (odom + cloud_registered + path, default), "
+                             "'inputs' (LiDAR + IMU topics parsed from config), "
+                             "'all' (every active topic)")
+    parser.add_argument("--skip-pcd", action="store_true", help="Skip running bag_to_pcd.py map reconstruction at the end")
+
     args = parser.parse_args()
-    
-    analyzer = FastLioAnalyzer(args.bag_path, args.config_file, args.decoder, args.start, args.duration)
+
+    analyzer = FastLioAnalyzer(args.bag_path, args.config_file, args.decoder, args.start, args.duration, args.record, args.skip_pcd)
     analyzer.run()
