@@ -1396,6 +1396,7 @@ private:
                         int(s_plot10[time_log_counter-1]),
                         s_plot11[time_log_counter-1],
                         t6 - t5);
+                    fflush(fp2);
                         // END
                 }
             }

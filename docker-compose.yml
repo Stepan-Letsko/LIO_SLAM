@@ -43,6 +43,9 @@ services:
       - ./log:/root/ros2_ws/log
       # Map a folder for ROS bags so you can play data recorded elsewhere.
       - ./bags:/root/ros2_ws/bags
+      # Map the USB drive for high-speed result storage.
+      # The OS auto-mounts the USB at /media/student/40E7-C59B — map that into the container as /mnt/usb.
+      - /media/student/40E7-C59B:/mnt/usb
       # Map the entire /dev directory to allow access to hardware devices (USB, Serial, etc.).
       - /dev:/dev
       # Map the X11 socket for GUI applications (Rviz)

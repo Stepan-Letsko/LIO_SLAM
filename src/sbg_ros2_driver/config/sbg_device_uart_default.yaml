@@ -29,12 +29,18 @@
       portName: "/dev/ttyUSB0"
     
       # Baud rate (4800 ,9600 ,19200 ,38400 ,115200 [default],230400 ,460800 ,921600)
-      baudRate: 921600
+      baudRate: 460800
+    
+    
 
       # List of fallback baud rates to test if configured baud rate doesn't work.
       fallbackBaudRates:
-        - 115200
         - 460800
+        - 230400
+        - 921600
+        - 115200
+        - 9600 
+      
 
       # Port Id
       # 0 PORT_A: Main communication interface. Full duplex.
@@ -119,7 +125,7 @@
       # 5 Synchronization is internal
       # 6 Synchronization is done using SYNC_OUT_A pin
       # 7 Synchronization is done using SYNC_OUT_B pin
-      gnss1ModuleSyncAssignment: 0
+      gnss1ModuleSyncAssignment: 5
       # RTCM input port assignment for Ellipse-N DGPS (see gnss1ModulePortAssignment for values)
       rtcmPortAssignment: 255
       # Odometer module pin assignment
@@ -252,7 +258,7 @@
       #
       # "ros" : ROS time (default)
       # "ins_unix" : INS absolute time referenced to UNIX epoch (00:00:00 UTC on 1 January 1970)
-      time_reference: "ros"
+      time_reference: "ins_unix"
 
       # Ros standard output:
       # Note: If true publish ROS standard messages (like /imu/data).

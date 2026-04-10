@@ -17,8 +17,8 @@ class BagRecorder(Node):
             10
         )
         self.process = None
-        # Ensure the bags directory exists inside the container
-        self.bag_dir = "/root/ros2_ws/bags"
+        # Save to USB drive
+        self.bag_dir = "/mnt/usb/results/missions"
         os.makedirs(self.bag_dir, exist_ok=True)
         
         # Publisher to broadcast current recording status
@@ -41,8 +41,8 @@ class BagRecorder(Node):
             bag_name = f"foxglove_rec_{timestamp}"
             full_path = os.path.join(self.bag_dir, bag_name)
             
-            # Topics to record (SLAM output + Raw Odometry)
-            topics = ["/cloud_registered", "/Odometry", "/path", "/tf", "/tf_static"]
+            # Topics to record (raw inputs needed to re-run FAST-LIO)
+            topics = ["/lidar_points", "/imu/data"]
             
             cmd = ["ros2", "bag", "record", "-o", full_path] + topics
             

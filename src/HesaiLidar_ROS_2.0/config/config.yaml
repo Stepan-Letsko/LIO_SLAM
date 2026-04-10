@@ -18,7 +18,7 @@ lidar:
         ptc_mode: 0                                   # The ptc mode: [0] tcp [1] tcp_ssl
       
       # public module
-      use_timestamp_type: 1                 # 0 use point cloud timestamp; 1 use receive timestamp
+      use_timestamp_type: 0                 # 0 use point cloud timestamp; 1 use receive timestamp
       frame_start_azimuth: 0
       thread_num: 4
       transform_flag: false

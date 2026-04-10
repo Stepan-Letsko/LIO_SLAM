@@ -9,7 +9,7 @@ from pathlib import Path
 def run_and_record(bag_path, config="avia.yaml"):
     # 1. Setup Paths
     bag_name = Path(bag_path).stem
-    results_base = Path("/root/ros2_ws/src/results")
+    results_base = Path("/mnt/usb/results")
     output_bag_dir = results_base / f"{bag_name}_recorded_output"
     
     if output_bag_dir.exists():

@@ -21,7 +21,7 @@ from pathlib import Path
 K_VALUES = [1, 2, 3, 4, 5]
 V_VALUES = [0.2, 0.4, 0.6, 0.8, 1.0]
 
-RESULTS_BASE = Path("/root/ros2_ws/src/results/parameter_sweep")
+RESULTS_BASE = Path("/mnt/usb/results/parameter_sweep")
 FAST_LIO_LOG_PATH = Path("/root/ros2_ws/src/FAST_LIO_ROS2/Log/fast_lio_time_log.csv")
 MASTER_CSV = RESULTS_BASE / "sweep_results_matrix.csv"
 

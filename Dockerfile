@@ -35,6 +35,8 @@ RUN apt-get update && \
     ros-humble-gtsam \
     # Foxglove Bridge for visualization
     ros-humble-foxglove-bridge \
+    # Topic tools for manipulating ROS 2 topics (like throttling)
+    ros-humble-topic-tools \
     # Tools to download missing headers
     wget \
     libboost-all-dev \
