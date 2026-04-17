@@ -1,0 +1,29 @@
+<?xml version="1.0"?>
+<?xml-model href="http://download.ros.org/schema/package_format3.xsd" schematypens="http://www.w3.org/2001/XMLSchema"?>
+<package format="3">
+  <name>slam_offline_pgo</name>
+  <version>0.1.0</version>
+  <description>
+    Offline pose graph optimisation pipeline for FAST-LIO2.
+    Reads a recorded ROS 2 bag, extracts keyframes, detects loop closures
+    via Scan Context + ICP, and outputs a corrected TUM trajectory and map.
+  </description>
+  <maintainer email="stepanletsko5@gmail.com">Stepan Letsko</maintainer>
+  <license>MIT</license>
+
+  <buildtool_depend>ament_python</buildtool_depend>
+
+  <depend>rclpy</depend>
+  <depend>sensor_msgs</depend>
+  <depend>nav_msgs</depend>
+  <depend>geometry_msgs</depend>
+  <depend>visualization_msgs</depend>
+
+  <test_depend>ament_copyright</test_depend>
+  <test_depend>ament_flake8</test_depend>
+  <test_depend>ament_pep257</test_depend>
+
+  <export>
+    <build_type>ament_python</build_type>
+  </export>
+</package>

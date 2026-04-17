@@ -1,0 +1,87 @@
+# Author: Stepan Letsko
+# Purpose: Configuration for the offline loop closure + pose graph optimisation pipeline.
+#          All magic numbers live here — do not hardcode them in the Python modules.
+
+slam_offline_pgo:
+
+  # ---------------------------------------------------------------------------
+  # Stage 1 — Keyframe sampling
+  # ---------------------------------------------------------------------------
+  keyframe_min_dist_m:   1.0     # Minimum translation (m) between keyframes
+  keyframe_min_angle_rad: 0.2    # Minimum rotation (rad) between keyframes
+
+  # Radial filter applied in SENSOR frame: drop points whose horizontal range
+  # to the LiDAR is below this value.  Removes the handheld-rig carrier's body
+  # that otherwise sits at ~0.2 m in a fixed ~30° sector and poisons both the
+  # Scan Context descriptor (kills rotation invariance) and GICP alignment.
+  carrier_filter_radius_m: 2.0
+
+  # ROS 2 topic names to read from the bag
+  odometry_topic:    /Odometry
+  cloud_topic:       /cloud_registered
+
+  # ---------------------------------------------------------------------------
+  # Stage 2 — Scan Context descriptor
+  # ---------------------------------------------------------------------------
+  scan_context:
+    num_rings:       20        # Radial bins  (match C++ PC_NUM_RING)
+    num_sectors:     60        # Angular bins (match C++ PC_NUM_SECTOR)
+    max_radius_m:    30.0      # Max range considered (m) — XT-16 indoor effective range
+    lidar_height_m:  1.0       # Sensor height above ground (added to Z so values stay positive)
+                               # Adjust to actual mount height on your robot
+
+    # Candidate search
+    num_candidates:  10        # KNN top-K from ring-key tree
+    min_index_gap:   30        # Exclude the last N keyframes from search (recency exclusion)
+    min_path_length_m: 20.0    # Min accumulated path length between candidate and query (false-match guard)
+
+    # Acceptance threshold
+    dist_threshold:  0.35      # SC cosine distance below which a candidate is forwarded to ICP
+                               # Range: 0.1 (strict) – 0.2 (permissive). Use 0.1 for featureless corridors.
+
+  # ---------------------------------------------------------------------------
+  # Stage 3 — ICP verification (Open3D Generalized ICP)
+  # ---------------------------------------------------------------------------
+  icp:
+    voxel_size_m:         0.3   # Voxel downsample applied to both clouds before GICP
+    max_correspondence_m: 1.0   # Correspondence search radius in the fine pass (m)
+                                # Coarse pass uses 2x this, for yaw-quantisation slack
+    max_iterations:       50
+    fitness_threshold:    0.15  # Inlier ratio ABOVE which a loop is ACCEPTED.
+                                # Range [0, 1]; higher is better.
+                                # Outdoor sparse scenes with partial overlap (drifted
+                                # revisits, some scene change) typically score 0.15-0.3
+                                # even for genuine matches.  Indoor dense scenes: 0.4+.
+    max_translation_m:    10.0  # Reject if ICP settles on |Δt| greater than this,
+                                # since loop-closure transforms on sensor-frame clouds
+                                # should be small (both scans see the same physical place)
+
+  # ---------------------------------------------------------------------------
+  # Stage 4 — Pose graph (Open3D global_optimization)
+  # ---------------------------------------------------------------------------
+  pose_graph:
+    # Noise model for sequential odometry edges (FAST-LIO is accurate short-term)
+    odom_trans_sigma_m:   0.05   # m  — translational uncertainty per edge
+    odom_rot_sigma_rad:   0.005  # rad — rotational uncertainty per edge
+
+    # Noise model for loop closure edges (less certain, verified by ICP)
+    loop_trans_sigma_m:   0.1
+    loop_rot_sigma_rad:   0.05
+
+    # Open3D optimisation settings
+    # max_correspondence_distance controls Open3D's line-process outlier
+    # rejection on loop edges: confidence = (m / (m + residual²))².  The default
+    # of 0.1 is meant for ICP-fine residuals (~cm).  Loop closures here have
+    # initial residuals on the order of metres because that is the drift the
+    # loops are meant to absorb — keep this large enough that real loops are
+    # not pruned as outliers.
+    max_correspondence_distance: 100.0
+    edge_prune_threshold:        0.25
+    preference_loop_closure:     2.0   # Weight multiplier for loop edges vs odometry edges
+    reference_node:              0     # Node held fixed during optimisation (usually first keyframe)
+
+  # ---------------------------------------------------------------------------
+  # Stage 5 — Map rendering
+  # ---------------------------------------------------------------------------
+  map:
+    voxel_size_m: 0.05    # Voxel grid leaf size for the merged map (0 = no downsampling)
