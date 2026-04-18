@@ -1,6 +1,6 @@
 # Author: Stepan Letsko
 # Date: February 10, 2026
-# Purpose: This script visualizes ScanContext descriptors saved as CSV files.
+# Purpose: This script visualises ScanContext descriptors saved as CSV files.
 #          It reads the flattened descriptor matrices, reshapes them into 2D images,
 #          and provides an interactive Matplotlib interface to navigate through
 #          the sequence of keyframes. This is useful for debugging loop closure
@@ -30,7 +30,7 @@ def main():
     print(f"Loading {file_path}...")
 
     # 2. Load Data
-    # Initialize lists to store timestamps and the 2D descriptor images
+    # Initialise lists to store timestamps and the 2D descriptor images
     timestamps = []
     images = []
 
@@ -72,7 +72,7 @@ def main():
         print("No valid frames found.")
         return
 
-    # 3. Interactive Visualization
+    # 3. Interactive Visualisation
     # Create a figure and axis for plotting
     fig, ax = plt.subplots(figsize=(10, 6))
     current_idx = 0

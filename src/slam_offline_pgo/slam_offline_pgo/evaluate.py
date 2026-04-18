@@ -94,6 +94,30 @@ def compute_ape(positions_est, positions_gt):
 # Plot helpers
 # ---------------------------------------------------------------------------
 
+def _rigid_align(source, target):
+    """
+    Procrustes / Umeyama rigid alignment in 3D (rotation + translation, no
+    scale) so that R @ source + t ≈ target in least-squares sense.  Used for
+    DISPLAY ONLY — PGO is allowed to globally rotate the map (only node 0 is
+    held fixed), and without alignment the two trajectories look like
+    different shapes even when they describe the same path.
+
+    Distances and shape are preserved by a rigid transform, so the closing
+    error printed in the legend is unchanged.
+    """
+    src_mean = source.mean(axis=0)
+    tgt_mean = target.mean(axis=0)
+    src_c = source - src_mean
+    tgt_c = target - tgt_mean
+    H = src_c.T @ tgt_c
+    U, _, Vt = np.linalg.svd(H)
+    R = Vt.T @ U.T
+    if np.linalg.det(R) < 0:                # reflection guard
+        Vt[-1, :] *= -1
+        R = Vt.T @ U.T
+    return source @ R.T + (tgt_mean - R @ src_mean)
+
+
 def _read_loops_csv(path):
     """Parse a loop_closure_report.csv → list of (from_index, to_index)."""
     pairs = []
@@ -104,11 +128,12 @@ def _read_loops_csv(path):
     return pairs
 
 
-def _plot_overlay(raw, corrected, axes_pair, output_path, title,
-                  loop_pairs=None, gt=None):
+def _plot_overlay(raw, corrected_aligned, ce_corr_actual,
+                  axes_pair, output_path, title,
+                  loop_pairs=None, gt_aligned=None):
     """
-    Draw a 2D overlay of raw vs corrected (and optional GT) for the given
-    axis indices (e.g. (0, 1) → XY top-down, (0, 2) → XZ side view).
+    Draw a 2D overlay of raw vs aligned-corrected (and optional GT) for the
+    given axis indices (e.g. (0, 1) → XY top-down, (0, 2) → XZ side view).
     """
     ax_i, ax_j = axes_pair
     labels = ['X (m)', 'Y (m)', 'Z (m)']
@@ -118,32 +143,25 @@ def _plot_overlay(raw, corrected, axes_pair, output_path, title,
     ax.plot(raw[:, ax_i], raw[:, ax_j],
             color='#d62728', lw=1.4, alpha=0.8,
             label=f'Raw FAST-LIO (closing err {compute_closing_error(raw):.2f} m)')
-    ax.plot(corrected[:, ax_i], corrected[:, ax_j],
+    ax.plot(corrected_aligned[:, ax_i], corrected_aligned[:, ax_j],
             color='#2ca02c', lw=1.4, alpha=0.9,
-            label=f'After PGO    (closing err {compute_closing_error(corrected):.2f} m)')
+            label=f'After PGO    (closing err {ce_corr_actual:.2f} m)')
 
-    if gt is not None:
-        ax.plot(gt[:, ax_i], gt[:, ax_j],
+    if gt_aligned is not None:
+        ax.plot(gt_aligned[:, ax_i], gt_aligned[:, ax_j],
                 color='#1f77b4', lw=1.0, alpha=0.7, ls='--', label='Ground truth')
 
-    # Start / end markers — drawn on the corrected trajectory
-    ax.plot(corrected[0, ax_i], corrected[0, ax_j],
-            marker='o', ms=10, mfc='white', mec='green', mew=2, ls='', label='Start')
-    ax.plot(corrected[-1, ax_i], corrected[-1, ax_j],
-            marker='X', ms=10, color='green', ls='', label='End')
-
-    # Loop closure edges — drawn on the corrected trajectory
+    # Loop closure edges — drawn on the (aligned) corrected trajectory.
+    # No legend entry: the dashed lines speak for themselves and adding them
+    # to the legend clutters the box.
     if loop_pairs:
         for (a, b) in loop_pairs:
-            if a < len(corrected) and b < len(corrected):
+            if a < len(corrected_aligned) and b < len(corrected_aligned):
                 ax.plot(
-                    [corrected[a, ax_i], corrected[b, ax_i]],
-                    [corrected[a, ax_j], corrected[b, ax_j]],
+                    [corrected_aligned[a, ax_i], corrected_aligned[b, ax_i]],
+                    [corrected_aligned[a, ax_j], corrected_aligned[b, ax_j]],
                     color='#9467bd', lw=1.0, alpha=0.6, ls=':',
                 )
-        # Legend entry only — one representative line
-        ax.plot([], [], color='#9467bd', lw=1.0, ls=':',
-                label=f'Loop edges (n={len(loop_pairs)})')
 
     ax.set_xlabel(labels[ax_i])
     ax.set_ylabel(labels[ax_j])
@@ -158,16 +176,23 @@ def _plot_overlay(raw, corrected, axes_pair, output_path, title,
 
 
 def plot_trajectories(raw, corrected, output_dir, loop_pairs=None, gt=None):
-    """Emit XY and XZ overlay plots."""
+    """Emit XY and XZ overlay plots, aligning corrected (and GT) to raw."""
     output_dir = Path(output_dir)
-    _plot_overlay(raw, corrected, (0, 1),
+
+    # Compute closing error from the UNALIGNED corrected trajectory — alignment
+    # is rigid so the number is the same either way, but be explicit.
+    ce_corr = compute_closing_error(corrected)
+    corrected_a = _rigid_align(corrected, raw)
+    gt_a        = _rigid_align(gt, raw) if gt is not None else None
+
+    _plot_overlay(raw, corrected_a, ce_corr, (0, 1),
                   output_dir / 'trajectory_xy.png',
                   title='Trajectory — top-down (XY)',
-                  loop_pairs=loop_pairs, gt=gt)
-    _plot_overlay(raw, corrected, (0, 2),
+                  loop_pairs=loop_pairs, gt_aligned=gt_a)
+    _plot_overlay(raw, corrected_a, ce_corr, (0, 2),
                   output_dir / 'trajectory_xz.png',
                   title='Trajectory — side view (XZ)',
-                  loop_pairs=loop_pairs, gt=gt)
+                  loop_pairs=loop_pairs, gt_aligned=gt_a)
 
 
 # ---------------------------------------------------------------------------
