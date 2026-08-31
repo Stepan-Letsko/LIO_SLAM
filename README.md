@@ -1,8 +1,6 @@
 # LIO_SLAM — Real-Time LiDAR-Inertial SLAM for UAV Subterranean Mapping
 
-Real-time, resource-constrained 3D SLAM for autonomous UAVs operating in GPS-denied, unlit environments such as caves and mining tunnels — built around an edge-cloud split-compute architecture running FAST-LIO2 on a Raspberry Pi 5.
-
-![Edge-cloud architecture overview](docs/images/architecture-overview.png)
+Real-time, resource-constrained 3D SLAM for autonomous UAVs operating in GPS-denied, unlit environments such as caves and mining tunnels, built around an edge-cloud split-compute architecture running FAST-LIO2 on a Raspberry Pi 5.
 
 This repository accompanies my Master of Engineering thesis at University College Dublin, and an associated conference paper.
 
@@ -44,8 +42,7 @@ The edge-cloud split is what makes this survivable on embedded hardware in the f
 
 Computational feasibility alone doesn't guarantee mapping accuracy — several configurations that satisfy the real-time constraint still produce unusable maps. The closing error heatmap below is what actually justifies the final `k = 5`, `v = 0.4 m` operating point: it's the smallest voxel size (i.e. densest, most accurate point cloud) that still holds sub-metre closing error.
 
-![Closing error heatmap for the Lake Circuit environment](docs/images/Closing-error-heatmap.png)
-*Closing error across the same 25 configurations — configurations at v ≤ 0.2 m diverge into tens-of-kilometres of error despite passing the real-time check, since frame drops break state propagation continuity.*
+<p align="center"> <img src="docs/images/closing-error-heatmap.png" width="800" alt="Closing error heatmap for the Lake Circuit environment"/> </p> <p align="center"><sub><i>Closing error across the same 25 configurations — configurations at v ≤ 0.2 m diverge into tens-of-kilometres of error despite passing the real-time check, since frame drops break state propagation continuity.</i></sub></p>
 
 ## Point cloud reconstructions vs. satellite imagery
 
