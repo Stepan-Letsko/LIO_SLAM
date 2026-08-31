@@ -42,7 +42,7 @@ The edge-cloud split is what makes this survivable on embedded hardware in the f
 
 Computational feasibility alone doesn't guarantee mapping accuracy — several configurations that satisfy the real-time constraint still produce unusable maps. The closing error heatmap below is what actually justifies the final `k = 5`, `v = 0.4 m` operating point: it's the smallest voxel size (i.e. densest, most accurate point cloud) that still holds sub-metre closing error.
 
-<p align="center"> <img src="docs/images/Closing-error-heatmap.png" width="800" alt="Closing error heatmap for the Lake Circuit environment"/> </p> <p align="center"><sub><i>Closing error across the same 25 configurations — configurations at v ≤ 0.2 m diverge into tens-of-kilometres of error despite passing the real-time check, since frame drops break state propagation continuity.</i></sub></p>
+<p align="center"> <img src="docs/images/Closing-error-heatmap.png" width="400" alt="Closing error heatmap for the Lake Circuit environment"/> </p> <p align="center"><sub><i>Closing error across the same 25 configurations — configurations at v ≤ 0.2 m diverge into tens-of-kilometres of error despite passing the real-time check, since frame drops break state propagation continuity.</i></sub></p>
 
 ## Point cloud reconstructions vs. satellite imagery
 
