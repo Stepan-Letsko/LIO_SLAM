@@ -21,7 +21,7 @@ Two sources of data underpin the results below:
 
 ## Results at a glance
 
-![High-definition point cloud reconstructions](docs/images/hd-scan-visuals.png)
+![High-definition point cloud reconstructions](docs/images/Hd-scan-visuals.png)
 *Close-up detail from the onboard 3D reconstructions. Left: Basement Corridor. Middle: Lake Circuit. Right: Engineering Building Exterior.*
 
 | Environment | Closing Error (m) | Drift (% trajectory) | Avg Latency (ms) | Peak RAM (MB) | Frame Drop Rate |
@@ -34,7 +34,7 @@ All three physical deployments held sub-metre closing error with <1% frame drops
 
 The edge-cloud split is what makes this survivable on embedded hardware in the first place: an odometry-only configuration held a peak of **588 MB** RAM indefinitely, while running native global mapping on the same Raspberry Pi 5 grew unbounded to 8.5 GB and crashed with an out-of-memory error.
 
-![Per-frame latency, RAM, and CPU over the full flight duration](docs/images/results-time-series.png)
+![Per-frame latency, RAM, and CPU over the full flight duration](docs/images/Results-time-series.png)
 *Processing latency, RAM consumption, and CPU utilisation over time for all three physical deployments — latency stays well under the 100 ms real-time threshold throughout, and RAM plateaus rather than growing unbounded.*
 
 ### Parameter sweep and operating point selection
@@ -44,7 +44,7 @@ The edge-cloud split is what makes this survivable on embedded hardware in the f
 
 Computational feasibility alone doesn't guarantee mapping accuracy — several configurations that satisfy the real-time constraint still produce unusable maps. The closing error heatmap below is what actually justifies the final `k = 5`, `v = 0.4 m` operating point: it's the smallest voxel size (i.e. densest, most accurate point cloud) that still holds sub-metre closing error.
 
-![Closing error heatmap for the Lake Circuit environment](docs/images/closing-error-heatmap.png)
+![Closing error heatmap for the Lake Circuit environment](docs/images/Closing-error-heatmap.png)
 *Closing error across the same 25 configurations — configurations at v ≤ 0.2 m diverge into tens-of-kilometres of error despite passing the real-time check, since frame drops break state propagation continuity.*
 
 ## Point cloud reconstructions vs. satellite imagery
@@ -61,7 +61,7 @@ Computational feasibility alone doesn't guarantee mapping accuracy — several c
 
 This division of labour is what keeps peak onboard RAM under 500 MB indefinitely, instead of growing unbounded until the hardware crashes.
 
-![Command centre view from Foxglove](docs/images/foxglove-command-centre.png)
+![Command centre view from Foxglove](docs/images/Foxglove-command-centre.png)
 *Live operator view during a mission: real-time 3D point cloud, IMU acceleration/angular velocity plots, a 2D trajectory minimap, and remote start/stop recording controls — all streamed headless from the Pi 5 over the 5 GHz telemetry link.*
 
 ### Hardware
